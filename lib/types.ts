@@ -84,6 +84,7 @@ export type RunEvent = {
   element?: DesignElement;
   source?: ResearchSource;
   paper?: ResearchPaper;
+  checks?: { passed: number; total: number };
 };
 
 export type AgentView = {

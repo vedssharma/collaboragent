@@ -3,6 +3,8 @@ import { createCodex } from '@ai-sdk/harness-codex';
 import type { HarnessV1 } from '@ai-sdk/harness';
 import { HarnessAgent } from '@ai-sdk/harness/agent';
 import { createVercelSandbox } from '@ai-sdk/sandbox-vercel';
+import { getExecutionCapabilities, getSandboxOptions } from './provider-config';
+export { getExecutionCapabilities } from './provider-config';
 
 type HarnessDefinition = {
   id: 'claude' | 'codex';
@@ -23,8 +25,7 @@ export const harnessCatalog: HarnessDefinition[] = [
     packageName: '@ai-sdk/harness-claude-code',
     isConfigured: () =>
       Boolean(
-        process.env.AI_GATEWAY_API_KEY ||
-          process.env.VERCEL_OIDC_TOKEN ||
+        getExecutionCapabilities().liveModels ||
           process.env.ANTHROPIC_API_KEY ||
           process.env.ANTHROPIC_AUTH_TOKEN,
       ),
@@ -36,8 +37,7 @@ export const harnessCatalog: HarnessDefinition[] = [
     packageName: '@ai-sdk/harness-codex',
     isConfigured: () =>
       Boolean(
-        process.env.AI_GATEWAY_API_KEY ||
-          process.env.VERCEL_OIDC_TOKEN ||
+        getExecutionCapabilities().liveModels ||
           process.env.CODEX_API_KEY ||
           process.env.OPENAI_API_KEY,
       ),
@@ -60,24 +60,11 @@ export function getProviderSummaries() {
       packageName: 'AI SDK provider',
       kind: 'model-agent' as const,
       configured: Boolean(
-        process.env.AI_GATEWAY_API_KEY ||
-          process.env.VERCEL_OIDC_TOKEN ||
+        getExecutionCapabilities().liveModels ||
           process.env.GOOGLE_GENERATIVE_AI_API_KEY,
       ),
     },
   ];
-}
-
-export function getExecutionCapabilities() {
-  const gatewayReady = Boolean(
-    process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN,
-  );
-  const sandboxReady = Boolean(process.env.VERCEL_OIDC_TOKEN);
-  return {
-    liveModels: gatewayReady,
-    codingHarnesses: gatewayReady && sandboxReady,
-    sandbox: sandboxReady,
-  };
 }
 
 /**
@@ -95,6 +82,7 @@ export function createCodingHarnessAgent(providerId: 'claude' | 'codex') {
     instructions:
       'Work only inside the assigned sandbox. Make focused changes, report file operations clearly, and keep the project runnable.',
     sandbox: createVercelSandbox({
+      ...getSandboxOptions(),
       runtime: 'node24',
       ports: [4000],
       timeout: 15 * 60 * 1000,

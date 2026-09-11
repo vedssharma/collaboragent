@@ -49,6 +49,8 @@ export function DesignCanvas({
   const [tool, setTool] = useState<'select' | 'hand'>('select');
   const [zoom, setZoom] = useState(1);
   const boardRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const panRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const dragRef = useRef<DragState | null>(null);
 
   const addElement = (kind: DesignElementKind) => {
@@ -149,7 +151,23 @@ export function DesignCanvas({
         </div>
       </header>
 
-      <div className={`design-board-scroll ${tool === 'hand' ? 'pannable' : ''}`}>
+      <div ref={scrollRef} className={`design-board-scroll ${tool === 'hand' ? 'pannable' : ''}`}
+        onPointerDown={(event) => {
+          if (tool !== 'hand' || event.button !== 0) return;
+          event.preventDefault();
+          event.currentTarget.setPointerCapture(event.pointerId);
+          panRef.current = { x: event.clientX, y: event.clientY, left: event.currentTarget.scrollLeft, top: event.currentTarget.scrollTop };
+        }}
+        onPointerMove={(event) => {
+          const pan = panRef.current;
+          if (!pan) return;
+          event.currentTarget.scrollLeft = pan.left - (event.clientX - pan.x);
+          event.currentTarget.scrollTop = pan.top - (event.clientY - pan.y);
+        }}
+        onPointerUp={() => { panRef.current = null; }}
+        onPointerCancel={() => { panRef.current = null; }}
+        onLostPointerCapture={() => { panRef.current = null; }}
+      >
         <div
           ref={boardRef}
           className="design-board"

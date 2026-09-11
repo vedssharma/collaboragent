@@ -1,37 +1,40 @@
-import type { RunEvent, WorkType } from '@/lib/types';
+import { z } from 'zod';
+import type { RunEvent } from '@/lib/types';
 import { runLiveCollaboration } from '@/lib/live-collaboration';
 import { runHarnessCollaboration } from '@/lib/harness-collaboration';
+import { getExecutionCapabilities } from '@/lib/provider-config';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
+const runRequest = z.object({
+  prompt: z.string().trim().min(1).max(4_000),
+  mode: z.enum(['live', 'harness']),
+  workType: z.enum(['coding', 'design', 'research']).default('coding'),
+}).strict();
+
 export async function POST(request: Request) {
-  const body = (await request.json().catch(() => ({}))) as {
-    prompt?: unknown;
-    mode?: unknown;
-    workType?: unknown;
-  };
-  const prompt =
-    typeof body.prompt === 'string' && body.prompt.trim()
-      ? body.prompt.trim().slice(0, 4_000)
-      : 'Turn this product idea into a working collaborative agent workspace.';
-  if (body.mode !== 'harness' && body.mode !== 'live') {
+  const parsed = runRequest.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) {
     return Response.json(
-      { error: 'A real execution mode is required: live or harness.' },
+      { error: 'Provide a prompt of 1–4,000 characters, mode live or harness, and a valid workspace type.' },
       { status: 400 },
     );
   }
-  const mode = body.mode;
-  const workType: WorkType =
-    body.workType === 'design' || body.workType === 'research' || body.workType === 'coding'
-      ? body.workType
-      : 'coding';
+  const { prompt, mode, workType } = parsed.data;
   if (mode === 'harness' && workType !== 'coding') {
     return Response.json(
       { error: 'Coding harnesses are only available in the coding workspace.' },
       { status: 400 },
     );
+  }
+
+  const capabilities = getExecutionCapabilities();
+  if (mode === 'harness' ? !capabilities.codingHarnesses : !capabilities.liveModels) {
+    return Response.json({ error: mode === 'harness'
+      ? 'Coding agents need AI Gateway and valid Vercel Sandbox credentials. Open Provider connections for setup.'
+      : 'Connect AI Gateway in Provider connections before starting the team.' }, { status: 503 });
   }
 
   const encoder = new TextEncoder();
@@ -62,25 +65,9 @@ export async function POST(request: Request) {
 
       try {
         if (mode === 'harness') {
-          if (!process.env.VERCEL_OIDC_TOKEN) {
-            send({
-              type: 'error',
-              message: 'Coding harness execution is not configured',
-              detail: 'Add VERCEL_OIDC_TOKEN, then restart the server.',
-            });
-          } else {
-            await runHarnessCollaboration({ prompt, signal: request.signal, emit: send });
-          }
+          await runHarnessCollaboration({ prompt, signal: request.signal, emit: send });
         } else if (mode === 'live') {
-          if (!process.env.AI_GATEWAY_API_KEY && !process.env.VERCEL_OIDC_TOKEN) {
-            send({
-              type: 'error',
-              message: 'Live execution is not configured',
-              detail: 'Add AI_GATEWAY_API_KEY or VERCEL_OIDC_TOKEN, then restart the server.',
-            });
-          } else {
-            await runLiveCollaboration({ prompt, workType, signal: request.signal, emit: send });
-          }
+          await runLiveCollaboration({ prompt, workType, signal: request.signal, emit: send });
         }
       } catch (error) {
         if (!cancelled && (error as Error).name !== 'AbortError') {
@@ -93,7 +80,9 @@ export async function POST(request: Request) {
             agentId: 'reviewer',
             status: 'reviewing',
             message: 'The real agent run could not finish',
-            detail: 'Check model access and gateway configuration, then try again. No workspace files were changed.',
+            detail: (error as Error).name === 'AI_HarnessSandboxAuthenticationError'
+              ? 'Vercel Sandbox authentication failed. Open Provider connections to refresh the server credentials. Existing artifacts have been kept.'
+              : 'Check model access and gateway configuration, then retry. Existing artifacts have been kept.',
           });
         }
       } finally {

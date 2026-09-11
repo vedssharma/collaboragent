@@ -31,6 +31,17 @@ npm run build
 npm run smoke:harness
 ```
 
+Browser regression tests (mocked model streams; no provider spend):
+
+```bash
+npx playwright install chromium
+npm run test:e2e
+```
+
+The suite covers mobile submission, retry preservation, interrupted streams,
+keyboard submission, review counts, empty files, research navigation, canvas
+panning/export, request validation, and provider setup. Boards export as SVG.
+
 The harness smoke test provisions a real Vercel Sandbox and verifies the full
 Claude Code → Codex → Claude handoff on one shared file, so it incurs provider
 and sandbox usage.
@@ -38,6 +49,31 @@ and sandbox usage.
 ## Provider setup
 
 Copy `.env.example` to `.env.local` and provide `AI_GATEWAY_API_KEY` for model mode. Linking the repository to a Vercel project populates `VERCEL_OIDC_TOKEN`, which enables Coding agents and Vercel Sandbox access. The `/api/providers` endpoint detects configured capabilities without returning secrets to the browser.
+
+Open **Settings → Provider connections** to inspect configuration and setup
+instructions. Configuration is not proof of provider access: the run performs
+actual authentication. Expired OIDC credentials disable sandbox execution. For
+local development, link the current project, run `vercel env pull .env.local`,
+and restart. Alternatively, supply all of `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and
+`VERCEL_PROJECT_ID` on the server for Sandbox access. AI Gateway is still required
+for the Gemini research stage. Direct API keys configure the corresponding
+coding harness, not the complete multi-provider model pipeline.
+
+### Subscription sign-in limitations
+
+This hosted app does **not** currently offer ChatGPT or Claude subscription
+sign-in. The installed AI SDK adapters support API keys and AI Gateway rather
+than subscription OAuth. Official Codex clients support ChatGPT sign-in,
+including `codex login --device-auth`, but that is not wired into this app's
+request-scoped sandbox adapter. See [Codex authentication](https://learn.chatgpt.com/docs/auth).
+
+Anthropic does not permit third-party products to offer Claude.ai login without
+approval. Claude Code access here uses API/gateway credentials; a Claude
+subscription does not provide those credentials. See
+[Claude authentication rules](https://code.claude.com/docs/en/legal-and-compliance).
+No subscription credentials are collected or copied from the user's machine.
+Per-user account linking would also require application accounts, isolated
+server-side credential storage, revocation, and supported provider integrations.
 
 `POST /api/runs` accepts a `workType` of `coding`, `design`, or `research` and supports two real execution modes:
 

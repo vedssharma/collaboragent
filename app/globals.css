@@ -1525,7 +1525,7 @@ button {
   overflow: auto;
   background: #e9ebe7;
 }
-.design-board-scroll.pannable { cursor: grab; }
+.design-board-scroll.pannable { cursor: grab; touch-action: none; user-select: none; }
 .design-board {
   position: relative;
   min-height: 510px;
@@ -1651,7 +1651,7 @@ button {
 }
 
 @media (max-width: 960px) {
-  .work-area { grid-template-columns: minmax(500px, 1fr); }
+  .work-area { grid-template-columns: minmax(0, 1fr); }
   .agent-panel { display: none; }
   .ghost-button,
   .live-pill { display: none; }
@@ -1673,6 +1673,10 @@ button {
   .task-flow-item { justify-content: center; }
   .task-connector { left: 50%; right: -50%; }
   .team-chip { display: none; }
+  .composer-card form { flex-wrap: wrap; }
+  .composer-card textarea { flex-basis: calc(100% - 48px); }
+  .composer-controls { margin-left: auto; }
+  .topbar-actions .ghost-button:has(.lucide-palette) { display: inline-flex; font-size: 10px; padding: 6px; }
   .work-type-tabs { padding: 0 8px; }
   .work-type-tabs button { min-width: 0; flex: 1; padding: 0 8px; }
   .asset-tools span { display: none; }
@@ -1682,3 +1686,16 @@ button {
   .paper-page { padding: 32px 26px 42px; }
   .paper-cover h2 { font-size: 22px; }
 }
+
+.provider-dialog { width: min(560px, calc(100vw - 32px)); max-height: 85vh; padding: 24px; border: 1px solid var(--line); border-radius: 16px; color: var(--ink); }
+.provider-dialog::backdrop { background: #17252188; }
+.provider-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.provider-dialog header button { display: grid; place-items: center; background: transparent; border: 0; padding: 6px; }
+.provider-dialog h2 { margin: 0; font-size: 20px; }
+.provider-dialog h3 { font-size: 14px; }
+.provider-dialog h3 span { display: block; color: var(--muted); font-weight: 400; margin-top: 5px; }
+.provider-dialog p { font-size: 13px; line-height: 1.6; }
+.provider-dialog section { border-top: 1px solid var(--line); padding: 8px 0 12px; }
+.provider-dialog a { color: var(--green); }
+.provider-dialog code { overflow-wrap: anywhere; font-size: 12px; }
+.provider-dialog summary { cursor: pointer; font-size: 13px; }

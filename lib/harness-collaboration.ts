@@ -3,6 +3,7 @@ import type { HarnessAgentSession } from '@ai-sdk/harness/agent';
 import { createClaudeCode } from '@ai-sdk/harness-claude-code';
 import { createCodex } from '@ai-sdk/harness-codex';
 import { createVercelSandbox } from '@ai-sdk/sandbox-vercel';
+import { getSandboxOptions } from './provider-config';
 import { gateway, Output, ToolLoopAgent } from 'ai';
 import { z } from 'zod';
 import type { AgentId, RunEvent } from '@/lib/types';
@@ -165,6 +166,7 @@ export async function runHarnessCollaboration({
   emit: EmitHarnessEvent;
 }) {
   const sandboxProvider = createVercelSandbox({
+    ...getSandboxOptions(),
     runtime: 'node24',
     ports: [CLAUDE_PORT, CODEX_PORT],
     timeout: 15 * 60 * 1000,
@@ -250,7 +252,7 @@ export async function runHarnessCollaboration({
   const codexAgent = new HarnessAgent({
     id: 'Collaboragent-codex',
     harness: createCodex({
-      auth: process.env.OPENAI_API_KEY ? 'direct' : 'ai-gateway',
+      auth: process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY ? 'direct' : 'ai-gateway',
       port: CODEX_PORT,
       reasoningEffort: 'high',
     }),

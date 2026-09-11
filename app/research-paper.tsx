@@ -23,6 +23,10 @@ export function ResearchPaper({
   sources: ResearchSource[];
 }) {
   const [activeSection, setActiveSection] = useState<string>('abstract');
+  const navigateTo = (id: string) => {
+    setActiveSection(id);
+    document.getElementById(`paper-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
   const sourceNumbers = useMemo(
     () => new Map(sources.map((source, index) => [source.id, index + 1])),
     [sources],
@@ -59,20 +63,17 @@ export function ResearchPaper({
     <section className="research-workspace" aria-label="Research paper workspace">
       <aside className="research-outline-panel">
         <div className="research-panel-title"><BookOpen size={14} /> Contents</div>
-        <button className={activeSection === 'abstract' ? 'active' : ''} onClick={() => setActiveSection('abstract')}>Abstract</button>
+        <button className={activeSection === 'abstract' ? 'active' : ''} onClick={() => navigateTo('abstract')}>Abstract</button>
         {paper.sections.map((section, index) => (
           <button
             key={section.id}
             className={activeSection === section.id ? 'active' : ''}
-            onClick={() => {
-              setActiveSection(section.id);
-              document.getElementById(`paper-${section.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }}
+            onClick={() => navigateTo(section.id)}
           >
             <span>{String(index + 1).padStart(2, '0')}</span>{section.heading}
           </button>
         ))}
-        <button className={activeSection === 'conclusion' ? 'active' : ''} onClick={() => setActiveSection('conclusion')}>Conclusion</button>
+        <button className={activeSection === 'conclusion' ? 'active' : ''} onClick={() => navigateTo('conclusion')}>Conclusion</button>
         <div className="paper-status"><CheckCircle2 size={12} /> Reviewed draft</div>
       </aside>
 

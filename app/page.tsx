@@ -10,6 +10,8 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DesignCanvas } from '@/app/design-canvas';
 import { ResearchPaper } from '@/app/research-paper';
+import { downloadDesignBoard } from '@/lib/design-export';
+import { ProviderConnections, type ConnectionSetup } from '@/app/provider-connections';
 import type {
   AgentId, AgentView, DesignElement, ResearchPaper as ResearchPaperType,
   ResearchSource, RunEvent, WorkType,
@@ -91,6 +93,7 @@ export default function Home() {
   const [selectedAgent, setSelectedAgent] = useState<AgentId>('codex');
   const [activity, setActivity] = useState<RunEvent[]>([]);
   const [progress, setProgress] = useState(0);
+  const [checks, setChecks] = useState<RunEvent['checks']>();
   const [runState, setRunState] = useState<RunState>('idle');
   const [activeFile, setActiveFile] = useState('');
   const [changedFiles, setChangedFiles] = useState<string[]>([]);
@@ -103,11 +106,15 @@ export default function Home() {
   const [researchPaper, setResearchPaper] = useState<ResearchPaperType | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [configuredProviders, setConfiguredProviders] = useState(0);
+  const [connectionsOpen, setConnectionsOpen] = useState(false);
+  const [connectionSetup, setConnectionSetup] = useState<ConnectionSetup | null>(null);
+  const [connectionsLoading, setConnectionsLoading] = useState(true);
   const [liveAvailable, setLiveAvailable] = useState(false);
   const [harnessAvailable, setHarnessAvailable] = useState(false);
   const [executionMode, setExecutionMode] = useState<ExecutionMode>('live');
   const [activeRunMode, setActiveRunMode] = useState<ExecutionMode | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
+  const artifactMissionsRef = useRef<Record<WorkType, string>>({ coding: '', design: '', research: '' });
 
   const mission = missions[workType];
   const draft = drafts[workType];
@@ -121,13 +128,14 @@ export default function Home() {
     if (runEvent.file) {
       setActiveFile(runEvent.file);
       setChangedFiles((current) => current.includes(runEvent.file as string) ? current : [...current, runEvent.file as string]);
-      if (runEvent.content) setFileContents((current) => ({ ...current, [runEvent.file as string]: runEvent.content as string }));
+      if (typeof runEvent.content === 'string') setFileContents((current) => ({ ...current, [runEvent.file as string]: runEvent.content as string }));
       if (runEvent.language) setFileLanguages((current) => ({ ...current, [runEvent.file as string]: runEvent.language as string }));
     }
     if (runEvent.element) setDesignElements((current) => [...current.filter((item) => item.id !== runEvent.element?.id), runEvent.element as DesignElement]);
     if (runEvent.designTitle) setDesignTitle(runEvent.designTitle);
     if (runEvent.source) setResearchSources((current) => [...current.filter((item) => item.id !== runEvent.source?.id), runEvent.source as ResearchSource]);
     if (runEvent.paper) setResearchPaper(runEvent.paper);
+    if (runEvent.checks) setChecks(runEvent.checks);
     if (runEvent.agentId && runEvent.cursor) setLastCursor({ agentId: runEvent.agentId, ...runEvent.cursor });
     if (runEvent.agentId) {
       setAgents((current) => current.map((agent) => agent.id === runEvent.agentId ? {
@@ -146,64 +154,97 @@ export default function Home() {
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
+    // A retry merges into partial output. A different mission replaces the old
+    // artifacts only when its first artifact arrives, never on a failed start.
+    let replaceArtifacts = nextMission !== artifactMissionsRef.current[nextWorkType];
     setMissions((current) => ({ ...current, [nextWorkType]: nextMission }));
     setDrafts((current) => ({ ...current, [nextWorkType]: nextMission }));
     setProgress(2); setRunState('running'); setActiveRunMode(nextMode); setComposerOpen(false);
-    setLastCursor(null); setActivity([]); setAgents(baseAgents(nextWorkType));
-    if (nextWorkType === 'coding') {
-      setActiveFile(''); setChangedFiles([]); setFileContents({}); setFileLanguages({});
-    } else if (nextWorkType === 'design') {
-      setDesignElements([]); setDesignTitle('');
-    } else {
-      setResearchSources([]); setResearchPaper(null);
-    }
+    setLastCursor(null); setActivity([]); setChecks(undefined); setAgents(baseAgents(nextWorkType));
 
     try {
       const response = await fetch('/api/runs', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: nextMission, mode: nextMode, workType: nextWorkType }), signal: controller.signal,
       });
-      if (!response.ok || !response.body) throw new Error('The team room could not start.');
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error ?? 'The team room could not start.');
+      }
+      if (!response.body) throw new Error('The server returned no event stream.');
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let terminalEvent = false;
       while (true) {
         const { value, done } = await reader.read();
+        if (controller.signal.aborted) return;
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        const frames = buffer.split('\n\n');
+        const frames = buffer.split(/\r?\n\r?\n/);
         buffer = frames.pop() ?? '';
         for (const frame of frames) {
           const data = frame.split('\n').find((line) => line.startsWith('data: '))?.slice(6);
-          if (data) applyEvent(JSON.parse(data) as RunEvent);
+          if (data) {
+            const runEvent = JSON.parse(data) as RunEvent;
+            const hasArtifact = nextWorkType === 'coding' ? runEvent.file !== undefined
+              : nextWorkType === 'design' ? runEvent.element !== undefined
+              : runEvent.source !== undefined || runEvent.paper !== undefined;
+            if (replaceArtifacts && hasArtifact) {
+              if (nextWorkType === 'coding') {
+                setActiveFile(''); setChangedFiles([]); setFileContents({}); setFileLanguages({});
+              } else if (nextWorkType === 'design') {
+                setDesignElements([]); setDesignTitle('');
+              } else {
+                setResearchSources([]); setResearchPaper(null);
+              }
+              replaceArtifacts = false;
+              artifactMissionsRef.current[nextWorkType] = nextMission;
+            }
+            applyEvent(runEvent);
+            if (runEvent.type === 'complete' || runEvent.type === 'error') terminalEvent = true;
+          }
         }
+        if (terminalEvent) { await reader.cancel(); break; }
       }
+      if (!terminalEvent) throw new Error('The stream ended before the team finished. Retry to continue working; existing artifacts have been kept.');
     } catch (error) {
-      if ((error as Error).name !== 'AbortError') applyEvent({
+      if (!controller.signal.aborted && (error as Error).name !== 'AbortError') applyEvent({
         id: `error_${Date.now()}`, at: new Date().toISOString(), type: 'error', workType: nextWorkType,
         agentId: 'reviewer', message: 'The live stream was interrupted',
-        detail: 'Your workspace is safe. Start the run again to reconnect.',
+        detail: error instanceof Error ? error.message : 'Retry the run. Existing artifacts have been kept.',
       });
     }
   }, [applyEvent]);
 
-  useEffect(() => {
-    fetch('/api/providers').then((response) => response.json()).then((data: {
+  const refreshConnections = useCallback(() => {
+    return fetch('/api/providers', { cache: 'no-store' }).then((response) => {
+      if (!response.ok) throw new Error('Connection status unavailable');
+      return response.json();
+    }).then((data: {
       providers?: { configured: boolean }[];
       capabilities?: { liveModels?: boolean; codingHarnesses?: boolean };
-    }) => {
+      setup?: ConnectionSetup;
+      }) => {
       setConfiguredProviders(data.providers?.filter((provider) => provider.configured).length ?? 0);
       const canRunLive = Boolean(data.capabilities?.liveModels);
       const canRunHarnesses = Boolean(data.capabilities?.codingHarnesses);
       setLiveAvailable(canRunLive); setHarnessAvailable(canRunHarnesses);
       setExecutionMode(canRunHarnesses ? 'harness' : 'live');
-    }).catch(() => undefined);
+      setConnectionSetup(data.setup ?? null);
+    }).catch(() => {
+      setConnectionSetup(null);
+      setLiveAvailable(false); setHarnessAvailable(false);
+    }).finally(() => {
+      setConnectionsLoading(false);
+    });
   }, []);
+  useEffect(() => { void refreshConnections(); }, [refreshConnections]);
   useEffect(() => () => controllerRef.current?.abort(), []);
 
   const switchWorkType = (nextWorkType: WorkType) => {
     if (runState === 'running' || nextWorkType === workType) return;
-    setWorkType(nextWorkType); setRunState('idle'); setProgress(0); setActivity([]);
+    setWorkType(nextWorkType); setRunState('idle'); setProgress(0); setActivity([]); setChecks(undefined);
     setActiveRunMode(null); setAgents(baseAgents(nextWorkType)); setSelectedAgent('codex'); setComposerOpen(false);
   };
   const selectedExecutionMode: ExecutionMode = workType === 'coding' ? executionMode : 'live';
@@ -217,13 +258,13 @@ export default function Home() {
   };
   const submitMission = (event: React.FormEvent) => {
     event.preventDefault();
-    if (draft.trim()) void startRun(draft.trim(), selectedExecutionMode, workType);
+    if (draft.trim() && executionAvailable && runState !== 'running') void startRun(draft.trim(), selectedExecutionMode, workType);
   };
   const taskState = (threshold: number, activeAt: number) => progress >= threshold ? 'done' : progress >= activeAt ? 'active' : 'waiting';
   const cursorAgent = lastCursor ? agents.find((agent) => agent.id === lastCursor.agentId) : undefined;
   const ModeIcon = config.icon;
   const artifactCount = workType === 'coding' ? changedFiles.length : workType === 'design' ? designElements.length : researchSources.length;
-  const thirdMetric = workType === 'research' ? researchPaper?.sections.length ?? 0 : progress >= 96 ? 12 : Math.floor(progress / 9);
+  const thirdMetric = workType === 'research' ? researchPaper?.sections.length ?? 0 : checks ? `${checks.passed}/${checks.total}` : '—';
   const summaryLabels = workType === 'coding' ? ['Agents', 'Files', 'Checks'] : workType === 'design' ? ['Agents', 'Assets', 'Checks'] : ['Agents', 'Sources', 'Sections'];
   const taskIcons = [Sparkles, workType === 'design' ? PenTool : workType === 'research' ? Search : Code2, ShieldCheck, CheckCircle2];
   const activeModeLabel = workType === 'coding' && activeRunMode === 'harness' ? 'Coding agents' : workType === 'design' ? 'Design team' : workType === 'research' ? 'Research team' : 'Model team';
@@ -239,7 +280,7 @@ export default function Home() {
           <button className="rail-button" title="Projects"><GitBranch size={18} /></button>
           <button className="rail-button" title="Search"><Search size={18} /></button>
         </nav>
-        <div className="rail-bottom"><button className="rail-button" title="Settings"><Settings size={18} /></button><button className="user-avatar" title="Your profile">VS</button></div>
+        <div className="rail-bottom"><button className="rail-button" title="Settings" onClick={() => setConnectionsOpen(true)}><Settings size={18} /></button><button className="user-avatar" title="Your profile">VS</button></div>
       </aside>
 
       <section className="workspace-shell">
@@ -252,7 +293,7 @@ export default function Home() {
           <div className="topbar-actions">
             <div className={`live-pill ${activeRunMode ?? 'idle'}`}><Radio size={12} /> {runState === 'running' ? activeModeLabel : runState === 'complete' ? 'Run complete' : runState === 'paused' ? 'Paused' : 'Idle'}</div>
             <div className="avatar-stack" aria-label="Four agents in this room">{agents.slice(0, 3).map((agent) => <AgentAvatar key={agent.id} agent={agent} small />)}<span className="stack-more">+1</span></div>
-            <button className="ghost-button">{workType === 'research' ? <Library size={15} /> : workType === 'design' ? <Palette size={15} /> : <Code2 size={15} />}{workType === 'coding' ? 'Repository' : workType === 'design' ? 'Export board' : 'Source library'}</button>
+            <button className="ghost-button" disabled={workType === 'design' && designElements.length === 0} onClick={workType === 'design' ? () => downloadDesignBoard(designTitle, designElements) : undefined}>{workType === 'research' ? <Library size={15} /> : workType === 'design' ? <Palette size={15} /> : <Code2 size={15} />}{workType === 'coding' ? 'Repository' : workType === 'design' ? 'Export board' : 'Source library'}</button>
             <button className="share-button"><Users size={15} /> Share room</button>
           </div>
         </header>
@@ -282,10 +323,10 @@ export default function Home() {
               </button>
             ))}</div>
             <div className="connection-card">
-              <div className="connection-title"><span><Zap size={14} /> Provider connections</span><button aria-label="Configure providers"><Settings size={13} /></button></div>
-              <div className="connection-row"><span className="provider-symbol claude-symbol">C</span><span>Claude</span><em>{workType === 'coding' && harnessAvailable ? 'Harness ready' : liveAvailable ? 'Live model' : 'Needs key'}</em></div>
-              <div className="connection-row"><span className="provider-symbol codex-symbol">O</span><span>Codex</span><em>{workType === 'coding' && harnessAvailable ? 'Harness ready' : liveAvailable ? 'Live model' : 'Needs key'}</em></div>
-              <p>{workType === 'research' && liveAvailable ? 'Live models + real-time web search ready' : harnessAvailable && workType === 'coding' ? 'Shared sandbox execution ready' : liveAvailable ? `Model execution ready · ${configuredProviders} providers routed` : 'Connect a provider to run agents'}</p>
+              <div className="connection-title"><span><Zap size={14} /> Provider connections</span><button aria-label="Configure providers" onClick={() => setConnectionsOpen(true)}><Settings size={13} /></button></div>
+              <div className="connection-row"><span className="provider-symbol claude-symbol">C</span><span>Claude</span><em>{workType === 'coding' && harnessAvailable ? 'Configured' : liveAvailable ? 'Live model' : 'Needs key'}</em></div>
+              <div className="connection-row"><span className="provider-symbol codex-symbol">O</span><span>Codex</span><em>{workType === 'coding' && harnessAvailable ? 'Configured' : liveAvailable ? 'Live model' : 'Needs key'}</em></div>
+              <p>{harnessAvailable && workType === 'coding' ? 'Sandbox credentials configured; access checked on run' : liveAvailable ? `Model connection configured · ${configuredProviders} providers routed` : 'Connect a provider to run agents'}</p>
             </div>
           </aside>
 
@@ -322,11 +363,16 @@ export default function Home() {
             {workType === 'research' && <ResearchPaper paper={researchPaper} sources={researchSources} />}
 
             <section className={`composer-card ${composerOpen ? 'expanded' : ''}`}><form onSubmit={submitMission}>
-              <div className="composer-avatar"><Command size={15} /></div><textarea aria-label={`Give the ${config.label.toLowerCase()} team a task`} value={draft} rows={composerOpen ? 3 : 1} onFocus={() => setComposerOpen(true)} onChange={(event) => setDrafts((current) => ({ ...current, [workType]: event.target.value }))} placeholder={config.placeholder} />
+              <div className="composer-avatar"><Command size={15} /></div><textarea aria-label={`Give the ${config.label.toLowerCase()} team a task`} value={draft} maxLength={4000} rows={composerOpen ? 3 : 1} onFocus={() => setComposerOpen(true)} onChange={(event) => setDrafts((current) => ({ ...current, [workType]: event.target.value }))} onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }} placeholder={config.placeholder} />
               <div className="composer-controls"><button type="button" className="attach-button" aria-label="Attach context"><Plus size={16} /></button>
                 {workType === 'coding' ? <button type="button" className={`mode-chip ${executionMode}`} aria-label="Toggle real agent execution" aria-pressed={executionMode === 'harness'} disabled={!liveAvailable || !harnessAvailable} onClick={() => setExecutionMode((current) => current === 'harness' ? 'live' : 'harness')}>{executionMode === 'harness' ? <Code2 size={11} /> : <Radio size={11} />}{executionMode === 'harness' ? 'Coding agents' : 'Model team'}</button> : <span className={`mode-chip ${workType}`}>{workType === 'design' ? <Palette size={11} /> : <Search size={11} />}{workType === 'design' ? 'Design agents' : 'Research agents'}</span>}
-                <span className="team-chip"><Users size={12} /> All agents <ChevronDown size={11} /></span><button type="submit" className="send-button" aria-label="Start team run" disabled={!draft.trim() || !executionAvailable}><ArrowUp size={16} /></button>
-              </div></form>{composerOpen && <p><span>Enter</span> to send · the orchestrator will divide the work across specialists</p>}</section>
+                <span className="team-chip"><Users size={12} /> All agents <ChevronDown size={11} /></span><button type="submit" className="send-button" aria-label="Start team run" disabled={!draft.trim() || !executionAvailable || runState === 'running'}><ArrowUp size={16} /></button>
+              </div></form>{composerOpen && <p><span>Enter</span> to send · Shift+Enter for a new line</p>}</section>
           </section>
 
           <aside className="activity-panel">
@@ -338,6 +384,7 @@ export default function Home() {
           </aside>
         </div>
       </section>
+      <ProviderConnections open={connectionsOpen} onClose={() => setConnectionsOpen(false)} setup={connectionSetup} onRefresh={() => { setConnectionsLoading(true); void refreshConnections(); }} loading={connectionsLoading} />
     </main>
   );
 }
