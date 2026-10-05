@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 
 export type ConnectionSetup = {
@@ -9,12 +9,23 @@ export type ConnectionSetup = {
   message: string;
 };
 
-export function ProviderConnections({ open, onClose, setup, onRefresh, loading }: {
+function AccessForm({ initialCode, onSave }: { initialCode: string; onSave: (code: string) => void }) {
+  const [code, setCode] = useState(initialCode);
+  return <form className="access-form" onSubmit={(event) => { event.preventDefault(); onSave(code.trim()); }}>
+    <input type="password" aria-label="Workspace access code" autoComplete="off" value={code} onChange={(event) => setCode(event.target.value)} />
+    <button type="submit" className="share-button">Save code</button>
+  </form>;
+}
+
+export function ProviderConnections({ open, onClose, setup, onRefresh, loading, accessRequired = false, accessCode = '', onAccessCodeChange }: {
   open: boolean;
   onClose: () => void;
   setup: ConnectionSetup | null;
   onRefresh: () => void;
   loading: boolean;
+  accessRequired?: boolean;
+  accessCode?: string;
+  onAccessCodeChange?: (code: string) => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -25,6 +36,10 @@ export function ProviderConnections({ open, onClose, setup, onRefresh, loading }
   return <dialog ref={dialogRef} className="provider-dialog" onClose={onClose} aria-labelledby="provider-title">
     <header><h2 id="provider-title">Provider connections</h2><button autoFocus onClick={onClose} aria-label="Close provider connections"><X size={18} /></button></header>
     <p aria-live="polite">{setup?.message ?? 'Connection status could not be loaded. Try refreshing.'}</p>
+    {accessRequired && <section><h3>Workspace access <span>{accessCode ? 'Code saved' : 'Code required'}</span></h3>
+      <p>This deployment requires an access code before agents can run. It is the server’s <code>COLLABORAGENT_ACCESS_TOKEN</code>, not a provider credential, and is kept only in this browser.</p>
+      <AccessForm key={accessCode} initialCode={accessCode} onSave={(code) => onAccessCodeChange?.(code)} />
+    </section>}
     <section><h3>Model team <span>{setup?.gateway === 'configured' ? 'Configured' : 'Needs setup'}</span></h3>
       <p>Coding, design, and research use the server’s AI Gateway connection. This is separate from a ChatGPT or Claude subscription.</p>
       <details><summary>Server setup</summary><p>Set <code>AI_GATEWAY_API_KEY</code> in your deployment’s environment settings, then redeploy. Local development reads <code>.env.local</code> after a restart.</p></details>

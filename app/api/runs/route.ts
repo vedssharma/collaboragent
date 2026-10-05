@@ -3,6 +3,7 @@ import type { RunEvent } from '@/lib/types';
 import { runLiveCollaboration } from '@/lib/live-collaboration';
 import { runHarnessCollaboration } from '@/lib/harness-collaboration';
 import { getExecutionCapabilities } from '@/lib/provider-config';
+import { checkAccess, runLimiter } from '@/lib/access-control';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -15,6 +16,9 @@ const runRequest = z.object({
 }).strict();
 
 export async function POST(request: Request) {
+  const access = checkAccess(request);
+  if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
+
   const parsed = runRequest.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return Response.json(
@@ -35,6 +39,14 @@ export async function POST(request: Request) {
     return Response.json({ error: mode === 'harness'
       ? 'Coding agents need AI Gateway and valid Vercel Sandbox credentials. Open Provider connections for setup.'
       : 'Connect AI Gateway in Provider connections before starting the team.' }, { status: 503 });
+  }
+
+  const slot = runLimiter.acquire(access.clientKey, mode === 'harness');
+  if (!slot.ok) {
+    return Response.json(
+      { error: slot.error },
+      { status: 429, headers: { 'Retry-After': String(slot.retryAfterSeconds) } },
+    );
   }
 
   const encoder = new TextEncoder();
@@ -87,6 +99,7 @@ export async function POST(request: Request) {
         }
       } finally {
         clearInterval(heartbeat);
+        slot.release();
         if (!cancelled) {
           closed = true;
           controller.close();

@@ -17,6 +17,8 @@ import type {
   ResearchSource, RunEvent, WorkType,
 } from '@/lib/types';
 
+const ACCESS_STORAGE_KEY = 'collaboragent.access-code';
+
 const AGENT_IDENTITIES = {
   claude: { name: 'Claude', provider: 'Anthropic', monogram: 'C', color: '#d36b4c', softColor: '#fff1eb' },
   codex: { name: 'Codex', provider: 'OpenAI', monogram: 'O', color: '#177c69', softColor: '#eaf8f4' },
@@ -113,6 +115,9 @@ export default function Home() {
   const [harnessAvailable, setHarnessAvailable] = useState(false);
   const [executionMode, setExecutionMode] = useState<ExecutionMode>('live');
   const [activeRunMode, setActiveRunMode] = useState<ExecutionMode | null>(null);
+  const [accessRequired, setAccessRequired] = useState(false);
+  const [accessCode, setAccessCode] = useState('');
+  const accessCodeRef = useRef('');
   const controllerRef = useRef<AbortController | null>(null);
   const artifactMissionsRef = useRef<Record<WorkType, string>>({ coding: '', design: '', research: '' });
 
@@ -164,11 +169,13 @@ export default function Home() {
 
     try {
       const response = await fetch('/api/runs', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(accessCodeRef.current ? { 'x-collaboragent-access': accessCodeRef.current } : {}) },
         body: JSON.stringify({ prompt: nextMission, mode: nextMode, workType: nextWorkType }), signal: controller.signal,
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
+        if (response.status === 401) { setAccessRequired(true); setConnectionsOpen(true); }
         throw new Error(body?.error ?? 'The team room could not start.');
       }
       if (!response.body) throw new Error('The server returned no event stream.');
@@ -225,7 +232,9 @@ export default function Home() {
       providers?: { configured: boolean }[];
       capabilities?: { liveModels?: boolean; codingHarnesses?: boolean };
       setup?: ConnectionSetup;
+      accessRequired?: boolean;
       }) => {
+      setAccessRequired(Boolean(data.accessRequired));
       setConfiguredProviders(data.providers?.filter((provider) => provider.configured).length ?? 0);
       const canRunLive = Boolean(data.capabilities?.liveModels);
       const canRunHarnesses = Boolean(data.capabilities?.codingHarnesses);
@@ -240,6 +249,21 @@ export default function Home() {
     });
   }, []);
   useEffect(() => { void refreshConnections(); }, [refreshConnections]);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(ACCESS_STORAGE_KEY) ?? '';
+      accessCodeRef.current = saved;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is only readable after hydration.
+      if (saved) setAccessCode(saved);
+    } catch { /* storage unavailable: the code is requested again on 401 */ }
+  }, []);
+  const saveAccessCode = (code: string) => {
+    accessCodeRef.current = code;
+    setAccessCode(code);
+    try {
+      if (code) localStorage.setItem(ACCESS_STORAGE_KEY, code); else localStorage.removeItem(ACCESS_STORAGE_KEY);
+    } catch { /* keep the code for this session only */ }
+  };
   useEffect(() => () => controllerRef.current?.abort(), []);
 
   const switchWorkType = (nextWorkType: WorkType) => {
@@ -384,7 +408,8 @@ export default function Home() {
           </aside>
         </div>
       </section>
-      <ProviderConnections open={connectionsOpen} onClose={() => setConnectionsOpen(false)} setup={connectionSetup} onRefresh={() => { setConnectionsLoading(true); void refreshConnections(); }} loading={connectionsLoading} />
+      <ProviderConnections open={connectionsOpen} onClose={() => setConnectionsOpen(false)} setup={connectionSetup} onRefresh={() => { setConnectionsLoading(true); void refreshConnections(); }} loading={connectionsLoading}
+        accessRequired={accessRequired} accessCode={accessCode} onAccessCodeChange={saveAccessCode} />
     </main>
   );
 }

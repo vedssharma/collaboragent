@@ -59,6 +59,23 @@ and restart. Alternatively, supply all of `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and
 for the Gemini research stage. Direct API keys configure the corresponding
 coding harness, not the complete multi-provider model pipeline.
 
+### Access control and limits
+
+Every run spends provider credit, and coding-agent runs provision billable
+sandboxes, so `/api/runs` is gated:
+
+- Set `COLLABORAGENT_ACCESS_TOKEN` to require a shared access code. Users enter
+  it under **Settings → Provider connections**; it is stored only in their
+  browser and sent as the `x-collaboragent-access` header.
+- In production, runs are refused until a token is configured. Set
+  `COLLABORAGENT_ALLOW_ANONYMOUS=true` only if the deployment is protected some
+  other way (for example Vercel Deployment Protection).
+- Each client gets one concurrent run, 20 runs per hour and 4 coding-agent
+  sandboxes per hour; the server allows 4 concurrent runs in total. Override
+  with `COLLABORAGENT_RUNS_PER_HOUR`, `COLLABORAGENT_HARNESS_RUNS_PER_HOUR` and
+  `COLLABORAGENT_MAX_CONCURRENT_RUNS`. Limits are kept in memory per server
+  instance.
+
 ### Subscription sign-in limitations
 
 This hosted app does **not** currently offer ChatGPT or Claude subscription

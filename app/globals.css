@@ -1699,3 +1699,5 @@ button {
 .provider-dialog a { color: var(--green); }
 .provider-dialog code { overflow-wrap: anywhere; font-size: 12px; }
 .provider-dialog summary { cursor: pointer; font-size: 13px; }
+.access-form { display: flex; gap: 8px; }
+.access-form input { flex: 1; min-width: 0; height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
