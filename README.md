@@ -33,12 +33,22 @@ npm run build
 npm run smoke:harness
 ```
 
+Unit tests cover the libraries and run all three pipelines against mocked
+models (no provider spend):
+
+```bash
+npm run test:unit
+```
+
 Browser regression tests (mocked model streams; no provider spend):
 
 ```bash
 npx playwright install chromium
 npm run test:e2e
 ```
+
+To use an already-installed Chromium instead of downloading one, set
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE` to its path.
 
 The suite covers mobile submission, retry preservation, interrupted streams,
 keyboard submission, review counts, empty files, research navigation, canvas
