@@ -12,6 +12,7 @@ Collaboragent is a working product prototype for a shared AI-agent workspace. A 
 - Interactive mission submission, stopping, retrying (output merges into existing artifacts), agent inspection, and file selection.
 - Real AI SDK v7 execution across Claude, Gemini, and OpenAI/Codex models.
 - Claude Code and Codex harness adapters, plus a provider readiness endpoint.
+  Harness runs collect up to 60 files (48 KB each, 400 KB total) and report anything skipped or truncated.
 
 ## Run locally
 

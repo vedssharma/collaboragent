@@ -11,6 +11,52 @@ import type { AgentId, RunEvent } from '@/lib/types';
 const CLAUDE_PORT = 4000;
 const CODEX_PORT = 4001;
 const WORK_DIR = 'Collaboragent-workspace';
+export const MAX_COLLECTED_FILES = 60;
+export const MAX_FILE_CHARS = 48_000;
+export const MAX_TOTAL_CHARS = 400_000;
+
+/**
+ * Tracks what is streamed back from the sandbox so nothing is dropped
+ * silently: every file that is skipped or clipped is reported to the user.
+ */
+export function createCollectionBudget({
+  maxFiles = MAX_COLLECTED_FILES,
+  maxFileChars = MAX_FILE_CHARS,
+  maxTotalChars = MAX_TOTAL_CHARS,
+} = {}) {
+  let totalChars = 0;
+  let collected = 0;
+  const clipped: string[] = [];
+  const skipped: Array<{ path: string; reason: string }> = [];
+  return {
+    get collected() { return collected; },
+    hasRoom: () => collected < maxFiles && totalChars < maxTotalChars,
+    skip(path: string, reason: string) { skipped.push({ path, reason }); },
+    accept(path: string, content: string) {
+      const isClipped = content.length > maxFileChars;
+      const kept = isClipped ? content.slice(0, maxFileChars) : content;
+      if (totalChars + kept.length > maxTotalChars) {
+        skipped.push({ path, reason: 'over the collection budget' });
+        return null;
+      }
+      totalChars += kept.length;
+      collected += 1;
+      if (isClipped) clipped.push(path);
+      return { content: kept, clipped: isClipped };
+    },
+    summary() {
+      const parts: string[] = [];
+      if (clipped.length) parts.push(`Truncated: ${clipped.join(', ')}`);
+      const byReason = new Map<string, string[]>();
+      for (const { path, reason } of skipped) byReason.set(reason, [...(byReason.get(reason) ?? []), path]);
+      for (const [reason, paths] of byReason) {
+        const shown = paths.slice(0, 12).join(', ');
+        parts.push(`Skipped (${reason}): ${shown}${paths.length > 12 ? ` and ${paths.length - 12} more` : ''}`);
+      }
+      return parts.join(' · ');
+    },
+  };
+}
 
 const researchSchema = z
   .object({
@@ -373,7 +419,7 @@ export async function runHarnessCollaboration({
     const workspacePath = `${sandboxSession.defaultWorkingDirectory}/${WORK_DIR}`;
     const listing = await restricted.run({
       command:
-        "find . -type f -not -path './node_modules/*' -not -path './.git/*' -not -path './.next/*' | sed 's#^./##' | sort | head -20",
+        "find . -type f -not -path './node_modules/*' -not -path './.git/*' -not -path './.next/*' | sed 's#^./##' | sort",
       workingDirectory: workspacePath,
       abortSignal: signal,
     });
@@ -383,37 +429,54 @@ export async function runHarnessCollaboration({
       .split('\n')
       .map((path) => path.trim())
       .filter(Boolean);
-    let totalBytes = 0;
-    let emittedFiles = 0;
+    const collection = createCollectionBudget();
     for (const path of paths) {
+      if (!collection.hasRoom()) {
+        collection.skip(path, 'over the collection budget');
+        continue;
+      }
       const content = await restricted.readTextFile({
         path: `${workspacePath}/${path}`,
         abortSignal: signal,
       });
-      if (content == null || content.includes('\u0000')) continue;
-      const clipped = content.slice(0, 16_000);
-      if (totalBytes + clipped.length > 55_000) break;
-      totalBytes += clipped.length;
-      emittedFiles += 1;
+      if (content == null || content.includes('\u0000')) {
+        collection.skip(path, 'binary');
+        continue;
+      }
+      const accepted = collection.accept(path, content);
+      if (!accepted) continue;
       emit({
         type: 'file',
         agentId: 'codex',
         status: 'done',
         message: `Collected ${path}`,
-        detail: `${clipped.split('\n').length} lines from the shared coding sandbox`,
+        detail: `${accepted.content.split('\n').length} lines from the shared coding sandbox${accepted.clipped ? ` · truncated to ${Math.round(MAX_FILE_CHARS / 1000)} KB` : ''}`,
         file: path,
-        content: clipped,
+        content: accepted.content,
         language: languageForPath(path),
         model: 'Claude Code + Codex CLI',
-        cursor: { line: Math.min(24, clipped.split('\n').length), column: 8 },
-        progress: Math.min(97, 91 + emittedFiles),
+        cursor: { line: Math.min(24, accepted.content.split('\n').length), column: 8 },
+        progress: Math.min(97, 91 + collection.collected),
+      });
+    }
+
+    const omissions = collection.summary();
+    if (omissions) {
+      emit({
+        type: 'activity',
+        agentId: 'codex',
+        status: 'done',
+        message: 'Some sandbox files were not collected in full',
+        detail: omissions,
+        model: 'Claude Code + Codex CLI',
+        progress: 98,
       });
     }
 
     emit({
       type: 'complete',
       message: 'Coding harness run complete — shared project collected',
-      detail: `${emittedFiles} files produced by Claude Code and Codex in an isolated sandbox`,
+      detail: `${collection.collected} of ${paths.length} files produced by Claude Code and Codex in an isolated sandbox${omissions ? ' · see activity for omitted files' : ''}`,
       progress: 100,
       taskId: 'ship',
     });
