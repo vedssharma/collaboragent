@@ -13,14 +13,14 @@ function digest(value: string) {
 }
 
 /**
- * Runs spend provider credit and can provision billable sandboxes, so a
- * deployment must not accept them anonymously. Set COLLABORAGENT_ACCESS_TOKEN
- * to require a shared passcode. Local development stays open unless a token is
- * configured; production refuses runs until one is (or anonymous access is
- * explicitly allowed).
+ * Whether the browser must supply an access code. Runs spend provider credit
+ * and can provision billable sandboxes, so a deployment must not accept them
+ * anonymously: set COLLABORAGENT_ACCESS_TOKEN to require a shared passcode.
+ * Local development stays open unless a token is configured; production
+ * refuses runs until one is (or anonymous access is explicitly allowed).
  */
 export function accessRequired(env: Environment = process.env) {
-  return Boolean(env.COLLABORAGENT_ACCESS_TOKEN) || env.NODE_ENV === 'production';
+  return Boolean(env.COLLABORAGENT_ACCESS_TOKEN);
 }
 
 export function checkAccess(request: Request, env: Environment = process.env): AccessDecision {

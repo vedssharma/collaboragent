@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkAccess, createRunLimiter } from '@/lib/access-control';
+import { accessRequired, checkAccess, createRunLimiter } from '@/lib/access-control';
 import { diffLines, highlightLines, splitHighlightedLines } from '@/lib/code-view';
 import { designBoardSvg } from '@/lib/design-export';
 import { createCollectionBudget } from '@/lib/harness-collaboration';
@@ -22,6 +22,11 @@ describe('access control', () => {
   it('refuses anonymous production runs unless explicitly allowed', () => {
     expect(checkAccess(request(), { NODE_ENV: 'production' })).toMatchObject({ ok: false, status: 503 });
     expect(checkAccess(request(), { NODE_ENV: 'production', COLLABORAGENT_ALLOW_ANONYMOUS: 'true' })).toMatchObject({ ok: true });
+  });
+
+  it('asks the browser for a code only when a token is configured', () => {
+    expect(accessRequired({ NODE_ENV: 'production' })).toBe(false);
+    expect(accessRequired({ COLLABORAGENT_ACCESS_TOKEN: 'secret' })).toBe(true);
   });
 
   it('requires the configured token', () => {
