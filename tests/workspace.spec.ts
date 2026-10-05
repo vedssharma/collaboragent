@@ -239,3 +239,16 @@ test('follow-up context is validated', async ({ request }) => {
   const response = await request.post('/api/runs', { data: { prompt: 'x', mode: 'live', workType: 'coding', refine: { previousMission: 'y', files: [{ path: '', content: 'z' }] } } });
   expect(response.status()).toBe(400);
 });
+
+test('code is highlighted and a changed file can be compared with its previous version', async ({ page }) => {
+  await stream(page, [
+    { ...file, file: 'app.ts', content: 'const greeting = "hi";\nexport { greeting };' },
+    { ...file, file: 'app.ts', content: 'const greeting = "hello";\nexport { greeting };' },
+    complete,
+  ]);
+  await start(page);
+  await expect(page.locator('.code-scroll .hljs-keyword').first()).toHaveText('const');
+  await page.getByRole('button', { name: 'Show changes' }).click();
+  await expect(page.locator('.diff-removed')).toContainText('"hi"');
+  await expect(page.locator('.diff-added')).toContainText('"hello"');
+});

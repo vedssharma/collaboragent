@@ -2,18 +2,19 @@
 
 import {
   Activity, ArrowUp, BookOpen, Check, Copy, Download, ChevronDown, ChevronRight, CircleDot,
-  Clock3, Code2, Layers, Command, FileCode2, Files, GitBranch, LayoutGrid, Library,
+  Clock3, Code2, GitCompare, Layers, Command, FileCode2, Files, GitBranch, LayoutGrid, Library,
   Palette, PanelLeftClose, PenTool, RotateCcw, Square,
   Play, Radio, Search, Settings, ShieldCheck, Sparkles, Users,
   Trash2, WandSparkles, Zap, CheckCircle2,
 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DesignCanvas } from '@/app/design-canvas';
 import { ResearchPaper } from '@/app/research-paper';
 import { downloadDesignBoard } from '@/lib/design-export';
 import { loadWorkspace, saveWorkspace } from '@/lib/workspace-storage';
 import { createZip, downloadBlob, slugify } from '@/lib/zip';
 import type { Refinement } from '@/lib/refinement';
+import { diffLines, highlightLines } from '@/lib/code-view';
 import { ProviderConnections, type ConnectionSetup } from '@/app/provider-connections';
 import type {
   AgentId, AgentView, DesignElement, ResearchPaper as ResearchPaperType,
@@ -131,6 +132,8 @@ export default function Home() {
   const [agentPanelOpen, setAgentPanelOpen] = useState(true);
   const [copiedFile, setCopiedFile] = useState('');
   const [buildOnResult, setBuildOnResult] = useState(false);
+  const [previousContents, setPreviousContents] = useState<Record<string, string>>({});
+  const [showChanges, setShowChanges] = useState(false);
   const [accessCode, setAccessCode] = useState('');
   const accessCodeRef = useRef('');
   const controllerRef = useRef<AbortController | null>(null);
@@ -139,13 +142,21 @@ export default function Home() {
   const mission = missions[workType];
   const draft = drafts[workType];
   const config = WORK_CONFIG[workType];
-  const codeLines = activeFile ? (fileContents[activeFile] ?? '').split('\n') : [];
+  const activeContent = activeFile ? (fileContents[activeFile] ?? '') : '';
+  const previousContent = activeFile ? previousContents[activeFile] : undefined;
+  const changesVisible = showChanges && previousContent !== undefined;
+  const highlightedLines = useMemo(() => activeFile ? highlightLines(activeContent, activeFile) : [], [activeContent, activeFile]);
+  const changedLines = useMemo(() => changesVisible ? diffLines(previousContent ?? '', activeContent) : null, [changesVisible, previousContent, activeContent]);
   const currentLanguage = activeFile ? (fileLanguages[activeFile] ?? 'Text') : '—';
 
   const applyEvent = useCallback((runEvent: RunEvent) => {
     setActivity((current) => [runEvent, ...current].slice(0, 40));
     if (runEvent.resetArtifacts) {
-      if (runEvent.workType === 'coding') { setActiveFile(''); setChangedFiles([]); setFileContents({}); setFileLanguages({}); }
+      if (runEvent.workType === 'coding') {
+        // Keep the draft as the comparison point for the revised files.
+        setFileContents((current) => { setPreviousContents(current); return {}; });
+        setActiveFile(''); setChangedFiles([]); setFileLanguages({});
+      }
       if (runEvent.workType === 'design') setDesignElements([]);
       if (runEvent.workType === 'research') { setResearchSources([]); setResearchPaper(null); }
     }
@@ -153,7 +164,14 @@ export default function Home() {
     if (runEvent.file) {
       setActiveFile(runEvent.file);
       setChangedFiles((current) => current.includes(runEvent.file as string) ? current : [...current, runEvent.file as string]);
-      if (typeof runEvent.content === 'string') setFileContents((current) => ({ ...current, [runEvent.file as string]: runEvent.content as string }));
+      if (typeof runEvent.content === 'string') {
+        const path = runEvent.file, content = runEvent.content;
+        setFileContents((current) => {
+          const before = current[path];
+          if (before !== undefined && before !== content) setPreviousContents((previous) => ({ ...previous, [path]: before }));
+          return { ...current, [path]: content };
+        });
+      }
       if (runEvent.language) setFileLanguages((current) => ({ ...current, [runEvent.file as string]: runEvent.language as string }));
     }
     if (runEvent.element) setDesignElements((current) => [...current.filter((item) => item.id !== runEvent.element?.id), runEvent.element as DesignElement]);
@@ -221,7 +239,7 @@ export default function Home() {
               : runEvent.source !== undefined || runEvent.paper !== undefined;
             if (replaceArtifacts && hasArtifact) {
               if (nextWorkType === 'coding') {
-                setActiveFile(''); setChangedFiles([]); setFileContents({}); setFileLanguages({});
+                setActiveFile(''); setChangedFiles([]); setFileContents({}); setFileLanguages({}); setPreviousContents({});
               } else if (nextWorkType === 'design') {
                 setDesignElements([]); setDesignTitle('');
               } else {
@@ -364,7 +382,7 @@ export default function Home() {
     setMissions((current) => ({ ...current, [workType]: '' }));
     setDrafts((current) => ({ ...current, [workType]: '' }));
     artifactMissionsRef.current[workType] = '';
-    if (workType === 'coding') { setActiveFile(''); setChangedFiles([]); setFileContents({}); setFileLanguages({}); setLastCursor(null); }
+    if (workType === 'coding') { setActiveFile(''); setChangedFiles([]); setFileContents({}); setFileLanguages({}); setPreviousContents({}); setLastCursor(null); }
     if (workType === 'design') { setDesignElements([]); setDesignTitle(''); }
     if (workType === 'research') { setResearchSources([]); setResearchPaper(null); }
     setRunState('idle'); setProgress(0); setActivity([]); setChecks(undefined); setActiveRunMode(null); setAgents(baseAgents(workType));
@@ -461,8 +479,10 @@ export default function Home() {
                   {changedFiles.map((path) => <button key={path} className={`file-row ${activeFile === path ? 'active' : ''}`} onClick={() => setActiveFile(path)} title={path}><FileCode2 size={13} /><span>{path.split('/').at(-1)}</span><em>M</em></button>)}
                 </aside><div className="code-pane">
                   <div className="tabs-row">{activeFile && <span className="file-tab active"><FileCode2 size={13} />{activeFile.split('/').at(-1)}<span className="modified-dot" /></span>}{runState === 'running' && <div className="tabs-presence">{agents.filter((agent) => agent.status !== 'queued' && agent.status !== 'done').slice(0, 2).map((agent) => <span className={`presence-mini ${agent.id}`} key={agent.id}>{agent.monogram}</span>)}</div>}</div>
-                  <div className="breadcrumb-row"><span>generated-project</span>{activeFile && <><ChevronRight size={11} /><strong>{activeFile}</strong></>}</div>
-                  <div className="code-scroll">{!activeFile && <div className="empty-editor"><FileCode2 size={22} /><strong>No generated files yet</strong><span>Start a coding run to populate this workspace.</span></div>}{codeLines.map((line, index) => <div className="code-line" key={`${index}-${line}`}><span className="line-number">{index + 1}</span><code>{line}</code></div>)}
+                  <div className="breadcrumb-row"><span>generated-project</span>{activeFile && <><ChevronRight size={11} /><strong>{activeFile}</strong></>}{previousContent !== undefined && <button type="button" className={`changes-toggle ${changesVisible ? 'active' : ''}`} aria-pressed={changesVisible} onClick={() => setShowChanges((current) => !current)}><GitCompare size={11} />{changesVisible ? 'Hide changes' : 'Show changes'}</button>}</div>
+                  <div className="code-scroll">{!activeFile && <div className="empty-editor"><FileCode2 size={22} /><strong>No generated files yet</strong><span>Start a coding run to populate this workspace.</span></div>}{changesVisible && !changedLines && <div className="diff-notice">This file is too large to compare.</div>}
+                    {changesVisible && changedLines ? changedLines.map((line, index) => <div className={`code-line diff-${line.kind}`} key={index}><span className="line-number">{line.kind === 'added' ? '+' : line.kind === 'removed' ? '−' : ''}</span><code>{line.text}</code></div>)
+                      : highlightedLines.map((html, index) => <div className="code-line" key={index}><span className="line-number">{index + 1}</span><code className="hljs" dangerouslySetInnerHTML={{ __html: html }} /></div>)}
                     {lastCursor && cursorAgent && <div className="live-cursor event-cursor" style={{ '--cursor-color': cursorAgent.color, top: `${46 + (lastCursor.line % 15) * 25}px`, left: `${Math.min(78, 28 + lastCursor.column * 2.2)}%` } as React.CSSProperties}><span className="cursor-caret" /><label>{cursorAgent.name}</label></div>}
                   </div><footer className="editor-footer"><span><GitBranch size={11} /> main*</span><span><CircleDot size={11} /> 0</span><span className="footer-spacer" /><span>{lastCursor ? `Ln ${lastCursor.line}, Col ${lastCursor.column}` : 'No cursor'}</span><span>{currentLanguage}</span></footer>
                 </div></div>
