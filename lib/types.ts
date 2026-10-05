@@ -87,6 +87,8 @@ export type RunEvent = {
   checks?: { passed: number; total: number };
   /** Clears this workspace's artifacts before the events that follow replace them. */
   resetArtifacts?: boolean;
+  /** Token totals for the run's model calls, reported on completion. */
+  usage?: { inputTokens: number; outputTokens: number; calls: number };
 };
 
 export type AgentView = {

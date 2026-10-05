@@ -4,12 +4,14 @@ import { createClaudeCode } from '@ai-sdk/harness-claude-code';
 import { createCodex } from '@ai-sdk/harness-codex';
 import { createVercelSandbox } from '@ai-sdk/sandbox-vercel';
 import { getSandboxOptions } from './provider-config';
+import { resolveModels } from './models';
 import { gateway, Output, ToolLoopAgent } from 'ai';
 import { z } from 'zod';
 import type { AgentId, RunEvent } from '@/lib/types';
 import type { Refinement } from '@/lib/refinement';
 import { safeArchivePath } from '@/lib/zip';
 
+const RESEARCH_MODEL = resolveModels().researcher;
 const CLAUDE_PORT = 4000;
 const CODEX_PORT = 4001;
 const WORK_DIR = 'Collaboragent-workspace';
@@ -68,7 +70,7 @@ const researchSchema = z
   .strict();
 
 const researchAgent = new ToolLoopAgent({
-  model: gateway('google/gemini-3.7-flash'),
+  model: gateway(RESEARCH_MODEL),
   maxOutputTokens: 1400,
   output: Output.object({ schema: researchSchema, name: 'harness_research_brief' }),
   instructions:
@@ -344,7 +346,7 @@ export async function runHarnessCollaboration({
       status: 'done',
       message: 'Research brief delivered to the coding agents',
       detail: research.direction,
-      model: 'google/gemini-3.7-flash',
+      model: RESEARCH_MODEL,
       progress: 12,
     });
 

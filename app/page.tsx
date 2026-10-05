@@ -15,6 +15,7 @@ import { loadWorkspace, saveWorkspace } from '@/lib/workspace-storage';
 import { createZip, downloadBlob, slugify } from '@/lib/zip';
 import type { Refinement } from '@/lib/refinement';
 import { diffLines, highlightLines } from '@/lib/code-view';
+import { formatTokens } from '@/lib/models';
 import { ProviderConnections, type ConnectionSetup } from '@/app/provider-connections';
 import type {
   AgentId, AgentView, DesignElement, ResearchPaper as ResearchPaperType,
@@ -134,6 +135,7 @@ export default function Home() {
   const [buildOnResult, setBuildOnResult] = useState(false);
   const [previousContents, setPreviousContents] = useState<Record<string, string>>({});
   const [showChanges, setShowChanges] = useState(false);
+  const [runUsage, setRunUsage] = useState<RunEvent['usage']>();
   const [accessCode, setAccessCode] = useState('');
   const accessCodeRef = useRef('');
   const controllerRef = useRef<AbortController | null>(null);
@@ -179,6 +181,7 @@ export default function Home() {
     if (runEvent.source) setResearchSources((current) => [...current.filter((item) => item.id !== runEvent.source?.id), runEvent.source as ResearchSource]);
     if (runEvent.paper) setResearchPaper(runEvent.paper);
     if (runEvent.checks) setChecks(runEvent.checks);
+    if (runEvent.usage) setRunUsage(runEvent.usage);
     if (runEvent.agentId && runEvent.cursor) setLastCursor({ agentId: runEvent.agentId, ...runEvent.cursor });
     if (runEvent.agentId) {
       setAgents((current) => current.map((agent) => agent.id === runEvent.agentId ? {
@@ -205,7 +208,7 @@ export default function Home() {
     setMissions((current) => ({ ...current, [nextWorkType]: nextMission }));
     setDrafts((current) => ({ ...current, [nextWorkType]: nextMission }));
     setProgress(2); setRunState('running'); setActiveRunMode(nextMode); setComposerOpen(false);
-    setLastCursor(null); setActivity([]); setChecks(undefined); setAgents(baseAgents(nextWorkType));
+    setLastCursor(null); setActivity([]); setChecks(undefined); setRunUsage(undefined); setAgents(baseAgents(nextWorkType));
 
     try {
       const response = await fetch('/api/runs', {
@@ -334,7 +337,7 @@ export default function Home() {
 
   const switchWorkType = (nextWorkType: WorkType) => {
     if (runState === 'running' || nextWorkType === workType) return;
-    setWorkType(nextWorkType); setRunState('idle'); setProgress(0); setActivity([]); setChecks(undefined);
+    setWorkType(nextWorkType); setRunState('idle'); setProgress(0); setActivity([]); setChecks(undefined); setRunUsage(undefined);
     setActiveRunMode(null); setAgents(baseAgents(nextWorkType)); setSelectedAgent('codex'); setComposerOpen(false);
   };
   const selectedExecutionMode: ExecutionMode = workType === 'coding' ? executionMode : 'live';
@@ -385,7 +388,7 @@ export default function Home() {
     if (workType === 'coding') { setActiveFile(''); setChangedFiles([]); setFileContents({}); setFileLanguages({}); setPreviousContents({}); setLastCursor(null); }
     if (workType === 'design') { setDesignElements([]); setDesignTitle(''); }
     if (workType === 'research') { setResearchSources([]); setResearchPaper(null); }
-    setRunState('idle'); setProgress(0); setActivity([]); setChecks(undefined); setActiveRunMode(null); setAgents(baseAgents(workType));
+    setRunState('idle'); setProgress(0); setActivity([]); setChecks(undefined); setRunUsage(undefined); setActiveRunMode(null); setAgents(baseAgents(workType));
   };
   const runToggleLabel = runState === 'running' ? 'Stop run' : runState === 'idle' ? 'Start run' : 'Retry run';
   const taskState = (threshold: number, activeAt: number) => progress >= threshold ? 'done' : progress >= activeAt ? 'active' : 'waiting';
@@ -510,7 +513,7 @@ export default function Home() {
             <div className="summary-strip">{[agents.filter((agent) => agent.status !== 'queued').length, artifactCount, thirdMetric].map((value, index) => <div key={summaryLabels[index]}><strong>{value}</strong><span>{summaryLabels[index]}</span></div>)}</div>
             <div className="activity-feed">{activity.length === 0 && <div className="empty-activity"><Activity size={20} /><strong>No agent activity yet</strong><span>Plans, searches, edits, and reviews will stream here.</span></div>}
               {activity.map((item, index) => { const agent = agents.find((candidate) => candidate.id === item.agentId); return <article className="activity-item" key={item.id}><div className="timeline-column">{agent ? <AgentAvatar agent={agent} small /> : <span className="system-event"><Activity size={13} /></span>}{index < activity.length - 1 && <span className="timeline-line" />}</div><div className="activity-copy"><div className="activity-meta"><strong>{agent?.name ?? 'Collaboragent'}</strong>{item.model && <em>{item.model.split('/').at(-1)}</em>}<span>{relativeTime(item)}</span></div><p>{item.message}</p>{item.detail && <small>{item.detail}</small>}{item.file && <button className="file-change" onClick={() => setActiveFile(item.file as string)}><FileCode2 size={12} />{item.file}<ChevronRight size={11} /></button>}{item.source && <a className="file-change source-change" href={item.source.url} target="_blank" rel="noreferrer"><BookOpen size={12} />{item.source.publisher}<ChevronRight size={11} /></a>}</div></article>; })}
-            </div><div className="activity-footer"><Clock3 size={13} /> Events are streamed as they happen</div>
+            </div><div className="activity-footer"><Clock3 size={13} /> {runUsage ? `${formatTokens(runUsage.inputTokens)} in · ${formatTokens(runUsage.outputTokens)} out · ${runUsage.calls} model calls` : 'Events are streamed as they happen'}</div>
           </aside>
         </div>
       </section>

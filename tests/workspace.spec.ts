@@ -252,3 +252,9 @@ test('code is highlighted and a changed file can be compared with its previous v
   await expect(page.locator('.diff-removed')).toContainText('"hi"');
   await expect(page.locator('.diff-added')).toContainText('"hello"');
 });
+
+test('token usage from the run is shown when it completes', async ({ page }) => {
+  await stream(page, [{ ...complete, usage: { inputTokens: 12_400, outputTokens: 3_100, calls: 4 } }]);
+  await start(page);
+  await expect(page.locator('.activity-footer')).toHaveText('12.4k in · 3.1k out · 4 model calls');
+});

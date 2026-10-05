@@ -99,6 +99,11 @@ server-side credential storage, revocation, and supported provider integrations.
 - `harness`: Claude Code and Codex collaborate sequentially inside one isolated Vercel Sandbox filesystem. Claude creates the architecture and first implementation, Codex inspects and completes it, and Claude performs the final review before Collaboragent collects the files and destroys the sandbox. This mode appears as **Coding agents** when `VERCEL_OIDC_TOKEN` is configured.
 - `live`: Claude and Gemini generate architecture and UX direction in parallel, Codex produces complete project files, and an independent OpenAI reviewer scores the artifacts. Every stage is projected into the `RunEvent` protocol and the generated files appear in the shared editor.
 
+Each role's model is configurable with `COLLABORAGENT_MODEL_ARCHITECT`,
+`COLLABORAGENT_MODEL_RESEARCHER`, `COLLABORAGENT_MODEL_BUILDER` and
+`COLLABORAGENT_MODEL_REVIEWER` (AI Gateway ids such as `anthropic/claude-haiku-4.5`).
+Live runs report total input and output tokens in the activity panel when they finish.
+
 Design and research use live mode. Design streams a typed spatial board into the canvas. Research uses the AI Gateway web-search tool, preserves returned source URLs, writes a multi-section paper from that source packet, and sends it through an independent research review.
 
 Generated artifacts are saved in the browser's local storage so a refresh keeps
