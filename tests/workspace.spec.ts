@@ -200,3 +200,18 @@ test('agent room can be hidden and a workspace cleared', async ({ page }) => {
   await expect(page.locator('.file-tree')).not.toContainText('hello.txt');
   await expect(page.locator('.live-pill')).toHaveText('Idle');
 });
+
+test('generated code downloads as a zip archive', async ({ page }) => {
+  await stream(page, [file, { ...file, file: 'src/app.ts', content: 'export {}' }, complete]);
+  await start(page, 'Zip project');
+  await expect(page.locator('.file-tree')).toContainText('app.ts');
+  const downloaded = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download code' }).click();
+  const download = await downloaded;
+  expect(download.suggestedFilename()).toBe('zip-project.zip');
+  const chunks: Buffer[] = [];
+  for await (const chunk of await download.createReadStream()) chunks.push(chunk as Buffer);
+  const archive = Buffer.concat(chunks);
+  expect(archive.subarray(0, 4).toString('hex')).toBe('504b0304');
+  expect(archive.toString('latin1')).toContain('zip-project/src/app.ts');
+});

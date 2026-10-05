@@ -1,7 +1,7 @@
 'use client';
 
 import {
-  Activity, ArrowUp, BookOpen, Check, ChevronDown, ChevronRight, CircleDot,
+  Activity, ArrowUp, BookOpen, Check, Copy, Download, ChevronDown, ChevronRight, CircleDot,
   Clock3, Code2, Command, FileCode2, Files, GitBranch, LayoutGrid, Library,
   Palette, PanelLeftClose, PenTool, RotateCcw, Square,
   Play, Radio, Search, Settings, ShieldCheck, Sparkles, Users,
@@ -12,6 +12,7 @@ import { DesignCanvas } from '@/app/design-canvas';
 import { ResearchPaper } from '@/app/research-paper';
 import { downloadDesignBoard } from '@/lib/design-export';
 import { loadWorkspace, saveWorkspace } from '@/lib/workspace-storage';
+import { createZip, downloadBlob, slugify } from '@/lib/zip';
 import { ProviderConnections, type ConnectionSetup } from '@/app/provider-connections';
 import type {
   AgentId, AgentView, DesignElement, ResearchPaper as ResearchPaperType,
@@ -127,6 +128,7 @@ export default function Home() {
   const [activeRunMode, setActiveRunMode] = useState<ExecutionMode | null>(null);
   const [accessRequired, setAccessRequired] = useState(false);
   const [agentPanelOpen, setAgentPanelOpen] = useState(true);
+  const [copiedFile, setCopiedFile] = useState('');
   const [accessCode, setAccessCode] = useState('');
   const accessCodeRef = useRef('');
   const controllerRef = useRef<AbortController | null>(null);
@@ -326,6 +328,19 @@ export default function Home() {
     event.preventDefault();
     if (draft.trim() && executionAvailable && runState !== 'running') void startRun(draft.trim(), selectedExecutionMode, workType);
   };
+  const downloadCode = () => {
+    const files = changedFiles.map((path) => ({ path, content: fileContents[path] ?? '' }));
+    if (files.length === 0) return;
+    const name = slugify(missions.coding, 'generated-project');
+    downloadBlob(new Blob([createZip(files, name)], { type: 'application/zip' }), `${name}.zip`);
+  };
+  const copyActiveFile = () => {
+    if (!activeFile) return;
+    navigator.clipboard?.writeText(fileContents[activeFile] ?? '').then(() => {
+      setCopiedFile(activeFile);
+      setTimeout(() => setCopiedFile((current) => current === activeFile ? '' : current), 1500);
+    }).catch(() => { /* clipboard blocked: nothing to report beyond the unchanged icon */ });
+  };
   const showSourceLibrary = () => {
     // The side panel is hidden on narrower screens; fall back to the paper's bibliography.
     const target = [...document.querySelectorAll<HTMLElement>('.source-library-panel, .bibliography')]
@@ -373,6 +388,7 @@ export default function Home() {
           <div className="topbar-actions">
             <div className={`live-pill ${activeRunMode ?? 'idle'}`}><Radio size={12} /> {runState === 'running' ? activeModeLabel : RUN_LABELS[runState].pill}</div>
             <div className="avatar-stack" aria-label="Four agents in this room">{agents.slice(0, 3).map((agent) => <AgentAvatar key={agent.id} agent={agent} small />)}<span className="stack-more">+1</span></div>
+            {workType === 'coding' && <button className="ghost-button" disabled={changedFiles.length === 0} onClick={downloadCode}><Download size={15} />Download code</button>}
             {workType === 'design' && <button className="ghost-button" disabled={designElements.length === 0} onClick={() => downloadDesignBoard(designTitle, designElements)}><Palette size={15} />Export board</button>}
             {workType === 'research' && <button className="ghost-button" disabled={researchSources.length === 0} onClick={showSourceLibrary}><Library size={15} />Source library</button>}
           </div>
@@ -426,7 +442,7 @@ export default function Home() {
 
             {workType === 'coding' && (
               <section className="editor-card">
-                <header className="editor-header"><div className="editor-title"><Files size={15} /><strong>Shared code</strong><span className="sync-state"><span /> Synced</span></div><div className="editor-actions"><span className="working-count"><Users size={13} /> {agents.filter((agent) => agent.status !== 'queued' && agent.status !== 'done').length} working</span></div></header>
+                <header className="editor-header"><div className="editor-title"><Files size={15} /><strong>Shared code</strong><span className="sync-state"><span /> Synced</span></div><div className="editor-actions"><span className="working-count"><Users size={13} /> {agents.filter((agent) => agent.status !== 'queued' && agent.status !== 'done').length} working</span><button aria-label={copiedFile === activeFile && activeFile ? 'Copied' : 'Copy file'} title="Copy file contents" disabled={!activeFile} onClick={copyActiveFile}>{copiedFile === activeFile && activeFile ? <Check size={15} /> : <Copy size={15} />}</button></div></header>
                 <div className="editor-body"><aside className="file-tree"><div className="tree-heading"><span>FILES</span></div><div className="folder-row"><ChevronDown size={13} /><span>generated-project</span></div>
                   {changedFiles.length === 0 && <p className="empty-files">Files appear when real agents create them.</p>}
                   {changedFiles.map((path) => <button key={path} className={`file-row ${activeFile === path ? 'active' : ''}`} onClick={() => setActiveFile(path)} title={path}><FileCode2 size={13} /><span>{path.split('/').at(-1)}</span><em>M</em></button>)}

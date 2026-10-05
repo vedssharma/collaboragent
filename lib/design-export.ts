@@ -1,4 +1,5 @@
 import type { DesignElement } from './types';
+import { downloadBlob, slugify } from './zip';
 
 function escapeXml(value: string) {
   return value.replace(/[&<>"']/g, (character) => ({
@@ -42,12 +43,5 @@ export function designBoardSvg(title: string, elements: DesignElement[]) {
 }
 
 export function downloadDesignBoard(title: string, elements: DesignElement[]) {
-  const url = URL.createObjectURL(new Blob([designBoardSvg(title, elements)], { type: 'image/svg+xml' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `${title.replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'design-board'}.svg`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadBlob(new Blob([designBoardSvg(title, elements)], { type: 'image/svg+xml' }), `${slugify(title, 'design-board')}.svg`);
 }
