@@ -7,6 +7,7 @@ import type {
   RunEvent,
   WorkType,
 } from '@/lib/types';
+import { collectSearchUrls, reconcileCitations, verifySources } from '@/lib/research-verification';
 
 export const LIVE_MODELS = {
   architect: 'anthropic/claude-sonnet-5',
@@ -671,7 +672,12 @@ async function runResearchCollaboration({
 
   ensureNotAborted(signal);
   const outline = outlineResult.output;
-  const discovery = discoveryResult.output;
+  const searchUrls = collectSearchUrls(discoveryResult.steps);
+  const { verified, rejected } = verifySources(discoveryResult.output.sources, searchUrls);
+  if (verified.length === 0) {
+    throw new Error('The web search returned no sources that match the research packet.');
+  }
+  const discovery = { ...discoveryResult.output, sources: verified };
   emit({
     type: 'activity',
     agentId: 'claude',
@@ -687,7 +693,7 @@ async function runResearchCollaboration({
       type: 'source',
       agentId: 'gemini',
       status: 'working',
-      message: `Verified source ${index + 1}`,
+      message: `Verified source ${index + 1} against search results`,
       detail: `${source.publisher} · ${source.title}`,
       source: source as ResearchSource,
       model: LIVE_MODELS.researcher,
@@ -695,6 +701,18 @@ async function runResearchCollaboration({
       taskId: 'search',
     });
   });
+  if (rejected.length > 0) {
+    emit({
+      type: 'activity',
+      agentId: 'reviewer',
+      status: 'reviewing',
+      message: `Discarded ${rejected.length} source${rejected.length === 1 ? '' : 's'} not returned by web search`,
+      detail: rejected.map((source) => source.url).join(' · ').slice(0, 600),
+      model: LIVE_MODELS.researcher,
+      progress: 47,
+      taskId: 'search',
+    });
+  }
   emit({
     type: 'activity',
     agentId: 'gemini',
@@ -723,7 +741,26 @@ async function runResearchCollaboration({
   });
 
   ensureNotAborted(signal);
-  const paper = paperResult.output as ResearchPaper;
+  const citations = reconcileCitations(
+    paperResult.output as ResearchPaper,
+    new Set(discovery.sources.map((source) => source.id)),
+  );
+  const paper = citations.paper;
+  if (citations.removedIds.length > 0 || citations.uncitedSections.length > 0) {
+    emit({
+      type: 'activity',
+      agentId: 'reviewer',
+      status: 'reviewing',
+      message: 'Citation check found unsupported references',
+      detail: [
+        citations.removedIds.length ? `Removed unknown source ids: ${citations.removedIds.join(', ')}` : '',
+        citations.uncitedSections.length ? `Sections without a verified citation: ${citations.uncitedSections.join('; ')}` : '',
+      ].filter(Boolean).join(' · '),
+      model: LIVE_MODELS.reviewer,
+      progress: 79,
+      taskId: 'build',
+    });
+  }
   emit({
     type: 'paper',
     agentId: 'codex',
@@ -747,7 +784,7 @@ async function runResearchCollaboration({
   });
 
   const reviewResult = await researchReviewer.generate({
-    prompt: `Original topic:\n${prompt}\n\nResearch plan:\n${JSON.stringify(outline, null, 2)}\n\nVerified sources:\n${JSON.stringify(discovery.sources, null, 2)}\n\nPaper:\n${JSON.stringify(paper, null, 2)}\n\nReview this paper now.`,
+    prompt: `Original topic:\n${prompt}\n\nResearch plan:\n${JSON.stringify(outline, null, 2)}\n\nVerified sources:\n${JSON.stringify(discovery.sources, null, 2)}\n\nPaper:\n${JSON.stringify(paper, null, 2)}\n\n${citations.uncitedSections.length ? `Automated citation check: these sections cite no verified source: ${citations.uncitedSections.join('; ')}.\n\n` : ''}Review this paper now.`,
     abortSignal: signal,
     timeout: 120_000,
   });
