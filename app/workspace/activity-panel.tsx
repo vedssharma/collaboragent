@@ -19,7 +19,7 @@ export function ActivityPanel({ activity, agents, runState, canToggle, onToggleR
   const toggleLabel = runState === 'running' ? 'Stop run' : runState === 'idle' ? 'Start run' : 'Retry run';
   return (
     <aside className="activity-panel">
-      <div className="activity-heading"><div><p className="eyebrow">OBSERVABILITY</p><h2>Live activity</h2></div><button className={`run-toggle ${runState}`} onClick={onToggleRun} title={toggleLabel} aria-label={toggleLabel} disabled={!canToggle}>{runState === 'running' ? <Square size={13} /> : runState === 'idle' ? <Play size={14} /> : <RotateCcw size={14} />}</button></div>
+      <div className="activity-heading"><h2>Live activity</h2><button className={`run-toggle ${runState}`} onClick={onToggleRun} title={toggleLabel} aria-label={toggleLabel} disabled={!canToggle}>{runState === 'running' ? <Square size={13} /> : runState === 'idle' ? <Play size={14} /> : <RotateCcw size={14} />}</button></div>
       <div className="summary-strip">{summary.map(({ label, value }) => <div key={label}><strong>{value}</strong><span>{label}</span></div>)}</div>
       {/* Announce the latest step to screen readers without re-reading the whole feed. */}
       <p className="sr-only" role="status" aria-live="polite">{activity[0] ? `${agents.find((agent) => agent.id === activity[0].agentId)?.name ?? 'Collaboragent'}: ${activity[0].message}` : ''}</p>

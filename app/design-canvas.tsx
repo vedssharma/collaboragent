@@ -33,10 +33,10 @@ type DragState = {
 const MAX_HISTORY = 50;
 
 const OWNER_COLORS: Record<DesignElement['owner'], string> = {
-  claude: '#d36b4c',
-  codex: '#177c69',
-  gemini: '#5a6ee8',
-  reviewer: '#9a6b26',
+  claude: 'var(--agent-claude)',
+  codex: 'var(--agent-codex)',
+  gemini: 'var(--agent-gemini)',
+  reviewer: 'var(--agent-reviewer)',
 };
 
 function clamp(value: number, minimum: number, maximum: number) {
