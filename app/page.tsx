@@ -129,6 +129,11 @@ export default function Home() {
 
   const applyEvent = useCallback((runEvent: RunEvent) => {
     setActivity((current) => [runEvent, ...current].slice(0, 40));
+    if (runEvent.resetArtifacts) {
+      if (runEvent.workType === 'coding') { setActiveFile(''); setChangedFiles([]); setFileContents({}); setFileLanguages({}); }
+      if (runEvent.workType === 'design') setDesignElements([]);
+      if (runEvent.workType === 'research') { setResearchSources([]); setResearchPaper(null); }
+    }
     if (typeof runEvent.progress === 'number') setProgress(runEvent.progress);
     if (runEvent.file) {
       setActiveFile(runEvent.file);

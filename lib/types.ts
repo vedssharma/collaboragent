@@ -85,6 +85,8 @@ export type RunEvent = {
   source?: ResearchSource;
   paper?: ResearchPaper;
   checks?: { passed: number; total: number };
+  /** Clears this workspace's artifacts before the events that follow replace them. */
+  resetArtifacts?: boolean;
 };
 
 export type AgentView = {

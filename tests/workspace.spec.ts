@@ -157,3 +157,15 @@ test('expired OIDC cannot enable harnesses; explicit sandbox credentials can', (
   expect(getSandboxOptions(explicit)).toEqual({ token: 'test-token', teamId: 'team', projectId: 'project' });
   expect(JSON.stringify(getConnectionSetup(explicit))).not.toContain('test-token');
 });
+
+test('a revision event replaces draft artifacts instead of merging', async ({ page }) => {
+  await stream(page, [
+    { ...file, workType: 'coding' },
+    { type: 'activity', workType: 'coding', message: 'Replacing the draft', resetArtifacts: true },
+    { ...file, workType: 'coding', file: 'revised.txt', content: 'Revised' },
+    complete,
+  ]);
+  await start(page);
+  await expect(page.locator('.code-scroll')).toContainText('Revised');
+  await expect(page.locator('.file-tree')).not.toContainText('hello.txt');
+});
