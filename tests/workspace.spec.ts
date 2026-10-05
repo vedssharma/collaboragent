@@ -188,3 +188,15 @@ test('generated files and the mission survive a page reload', async ({ page }) =
   await expect(page.locator('.code-scroll')).toContainText('Hello');
   await expect(page.locator('.mission-card h1')).toHaveText('Persist me');
 });
+
+test('agent room can be hidden and a workspace cleared', async ({ page }) => {
+  await page.getByRole('button', { name: 'Hide agent room' }).click();
+  await expect(page.locator('.agent-panel')).toBeHidden();
+  await page.getByRole('button', { name: 'Show agent room' }).click();
+  await expect(page.locator('.agent-panel')).toBeVisible();
+  await stream(page, [file, complete]); await start(page);
+  await expect(page.locator('.code-scroll')).toContainText('Hello');
+  await page.getByRole('button', { name: 'Clear workspace' }).click();
+  await expect(page.locator('.file-tree')).not.toContainText('hello.txt');
+  await expect(page.locator('.live-pill')).toHaveText('Idle');
+});

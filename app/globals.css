@@ -1701,3 +1701,11 @@ button {
 .provider-dialog summary { cursor: pointer; font-size: 13px; }
 .access-form { display: flex; gap: 8px; }
 .access-form input { flex: 1; min-width: 0; height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+
+.work-area.agents-hidden { grid-template-columns: minmax(500px, 1fr) 326px; }
+.work-area.agents-hidden .agent-panel { display: none; }
+@media (max-width: 1260px) {
+  .work-area.agents-hidden { grid-template-columns: minmax(0, 1fr); }
+}
+.collapse-button[aria-pressed='true'] { color: var(--green); }
+.more-button:disabled { cursor: not-allowed; opacity: 0.4; }

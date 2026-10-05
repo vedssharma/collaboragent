@@ -1,11 +1,11 @@
 'use client';
 
 import {
-  Activity, ArrowUp, BookOpen, Bot, Check, ChevronDown, ChevronRight, CircleDot,
+  Activity, ArrowUp, BookOpen, Check, ChevronDown, ChevronRight, CircleDot,
   Clock3, Code2, Command, FileCode2, Files, GitBranch, LayoutGrid, Library,
-  MessageSquareText, MoreHorizontal, Palette, PanelLeftClose, PenTool, RotateCcw, Square,
-  Play, Plus, Radio, Search, Settings, ShieldCheck, Sparkles, Users,
-  WandSparkles, X, Zap, CheckCircle2,
+  Palette, PanelLeftClose, PenTool, RotateCcw, Square,
+  Play, Radio, Search, Settings, ShieldCheck, Sparkles, Users,
+  Trash2, WandSparkles, Zap, CheckCircle2,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DesignCanvas } from '@/app/design-canvas';
@@ -126,6 +126,7 @@ export default function Home() {
   const [executionMode, setExecutionMode] = useState<ExecutionMode>('live');
   const [activeRunMode, setActiveRunMode] = useState<ExecutionMode | null>(null);
   const [accessRequired, setAccessRequired] = useState(false);
+  const [agentPanelOpen, setAgentPanelOpen] = useState(true);
   const [accessCode, setAccessCode] = useState('');
   const accessCodeRef = useRef('');
   const controllerRef = useRef<AbortController | null>(null);
@@ -325,6 +326,23 @@ export default function Home() {
     event.preventDefault();
     if (draft.trim() && executionAvailable && runState !== 'running') void startRun(draft.trim(), selectedExecutionMode, workType);
   };
+  const showSourceLibrary = () => {
+    // The side panel is hidden on narrower screens; fall back to the paper's bibliography.
+    const target = [...document.querySelectorAll<HTMLElement>('.source-library-panel, .bibliography')]
+      .find((element) => element.offsetParent !== null);
+    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    target?.querySelector<HTMLElement>('a')?.focus({ preventScroll: true });
+  };
+  const clearCurrentWorkspace = () => {
+    if (runState === 'running') return;
+    setMissions((current) => ({ ...current, [workType]: '' }));
+    setDrafts((current) => ({ ...current, [workType]: '' }));
+    artifactMissionsRef.current[workType] = '';
+    if (workType === 'coding') { setActiveFile(''); setChangedFiles([]); setFileContents({}); setFileLanguages({}); setLastCursor(null); }
+    if (workType === 'design') { setDesignElements([]); setDesignTitle(''); }
+    if (workType === 'research') { setResearchSources([]); setResearchPaper(null); }
+    setRunState('idle'); setProgress(0); setActivity([]); setChecks(undefined); setActiveRunMode(null); setAgents(baseAgents(workType));
+  };
   const runToggleLabel = runState === 'running' ? 'Stop run' : runState === 'idle' ? 'Start run' : 'Retry run';
   const taskState = (threshold: number, activeAt: number) => progress >= threshold ? 'done' : progress >= activeAt ? 'active' : 'waiting';
   const cursorAgent = lastCursor ? agents.find((agent) => agent.id === lastCursor.agentId) : undefined;
@@ -338,29 +356,25 @@ export default function Home() {
   return (
     <main className={`app-shell mode-${workType}`}>
       <aside className="icon-rail">
-        <button className="brand-mark" aria-label="Collaboragent home"><span /><span /><span /></button>
+        <span className="brand-mark" aria-hidden="true"><span /><span /><span /></span>
         <nav className="rail-nav" aria-label="Primary">
-          <button className="rail-button active" title="Workspace"><LayoutGrid size={18} /></button>
-          <button className="rail-button" title="Agents"><Bot size={18} /></button>
-          <button className="rail-button" title="Messages"><MessageSquareText size={18} /></button>
-          <button className="rail-button" title="Projects"><GitBranch size={18} /></button>
-          <button className="rail-button" title="Search"><Search size={18} /></button>
+          <span className="rail-button active" title="Workspace" aria-current="page"><LayoutGrid size={18} /></span>
         </nav>
-        <div className="rail-bottom"><button className="rail-button" title="Settings" onClick={() => setConnectionsOpen(true)}><Settings size={18} /></button><button className="user-avatar" title="Your profile">VS</button></div>
+        <div className="rail-bottom"><button className="rail-button" title="Settings" aria-label="Settings" onClick={() => setConnectionsOpen(true)}><Settings size={18} /></button></div>
       </aside>
 
       <section className="workspace-shell">
         <header className="topbar">
           <div className="project-identity">
-            <button className="collapse-button" aria-label="Collapse sidebar"><PanelLeftClose size={17} /></button>
+            <button className="collapse-button" aria-label={agentPanelOpen ? 'Hide agent room' : 'Show agent room'} aria-pressed={!agentPanelOpen} onClick={() => setAgentPanelOpen((open) => !open)}><PanelLeftClose size={17} /></button>
             <div className="project-icon"><ModeIcon size={16} /></div>
-            <div><div className="project-name-row"><strong>Agent workspace</strong><ChevronDown size={14} /></div><span className="branch-label"><ModeIcon size={11} /> {config.title}</span></div>
+            <div><div className="project-name-row"><strong>Agent workspace</strong></div><span className="branch-label"><ModeIcon size={11} /> {config.title}</span></div>
           </div>
           <div className="topbar-actions">
             <div className={`live-pill ${activeRunMode ?? 'idle'}`}><Radio size={12} /> {runState === 'running' ? activeModeLabel : RUN_LABELS[runState].pill}</div>
             <div className="avatar-stack" aria-label="Four agents in this room">{agents.slice(0, 3).map((agent) => <AgentAvatar key={agent.id} agent={agent} small />)}<span className="stack-more">+1</span></div>
-            <button className="ghost-button" disabled={workType === 'design' && designElements.length === 0} onClick={workType === 'design' ? () => downloadDesignBoard(designTitle, designElements) : undefined}>{workType === 'research' ? <Library size={15} /> : workType === 'design' ? <Palette size={15} /> : <Code2 size={15} />}{workType === 'coding' ? 'Repository' : workType === 'design' ? 'Export board' : 'Source library'}</button>
-            <button className="share-button"><Users size={15} /> Share room</button>
+            {workType === 'design' && <button className="ghost-button" disabled={designElements.length === 0} onClick={() => downloadDesignBoard(designTitle, designElements)}><Palette size={15} />Export board</button>}
+            {workType === 'research' && <button className="ghost-button" disabled={researchSources.length === 0} onClick={showSourceLibrary}><Library size={15} />Source library</button>}
           </div>
         </header>
 
@@ -375,9 +389,9 @@ export default function Home() {
           })}
         </nav>
 
-        <div className="work-area">
+        <div className={`work-area ${agentPanelOpen ? '' : 'agents-hidden'}`}>
           <aside className="agent-panel">
-            <div className="panel-heading"><div><p className="eyebrow">COLLABORATORS</p><h2>Agent room</h2></div><button className="icon-button" aria-label="Add agent"><Plus size={16} /></button></div>
+            <div className="panel-heading"><div><p className="eyebrow">COLLABORATORS</p><h2>Agent room</h2></div></div>
             <div className="room-status"><span className="pulse-dot" />{runState === 'running' ? 'Team is collaborating' : runState === 'complete' ? 'Team is ready for review' : 'Team is standing by'}</div>
             <div className="agent-list">{agents.map((agent) => (
               <button key={agent.id} className={`agent-card ${selectedAgent === agent.id ? 'selected' : ''}`} onClick={() => setSelectedAgent(agent.id)}>
@@ -401,7 +415,7 @@ export default function Home() {
               <div className="mission-topline"><div className="mission-icon"><WandSparkles size={17} /></div><div className="mission-copy">
                 <div className="mission-label-row"><span>{config.eyebrow}</span><span className="mission-status"><span /> {runState === 'running' ? 'In progress' : RUN_LABELS[runState].mission}</span></div>
                 <h1>{mission || config.emptyMission}</h1>
-              </div><button className="more-button" aria-label="Mission menu"><MoreHorizontal size={18} /></button></div>
+              </div><button className="more-button" aria-label="Clear workspace" title="Clear this workspace" disabled={runState === 'running' || (!mission && artifactCount === 0)} onClick={clearCurrentWorkspace}><Trash2 size={16} /></button></div>
               <div className="mission-progress-row"><div className="large-progress"><span style={{ width: `${progress}%` }} /></div><strong>{progress}%</strong></div>
               <div className="task-flow">{config.tasks.map((label, index) => {
                 const TaskIcon = taskIcons[index];
@@ -412,12 +426,12 @@ export default function Home() {
 
             {workType === 'coding' && (
               <section className="editor-card">
-                <header className="editor-header"><div className="editor-title"><Files size={15} /><strong>Shared code</strong><span className="sync-state"><span /> Synced</span></div><div className="editor-actions"><span className="working-count"><Users size={13} /> {agents.filter((agent) => agent.status !== 'queued' && agent.status !== 'done').length} working</span><button aria-label="Editor menu"><MoreHorizontal size={17} /></button></div></header>
-                <div className="editor-body"><aside className="file-tree"><div className="tree-heading"><span>FILES</span><MoreHorizontal size={14} /></div><div className="folder-row"><ChevronDown size={13} /><span>generated-project</span></div>
+                <header className="editor-header"><div className="editor-title"><Files size={15} /><strong>Shared code</strong><span className="sync-state"><span /> Synced</span></div><div className="editor-actions"><span className="working-count"><Users size={13} /> {agents.filter((agent) => agent.status !== 'queued' && agent.status !== 'done').length} working</span></div></header>
+                <div className="editor-body"><aside className="file-tree"><div className="tree-heading"><span>FILES</span></div><div className="folder-row"><ChevronDown size={13} /><span>generated-project</span></div>
                   {changedFiles.length === 0 && <p className="empty-files">Files appear when real agents create them.</p>}
                   {changedFiles.map((path) => <button key={path} className={`file-row ${activeFile === path ? 'active' : ''}`} onClick={() => setActiveFile(path)} title={path}><FileCode2 size={13} /><span>{path.split('/').at(-1)}</span><em>M</em></button>)}
                 </aside><div className="code-pane">
-                  <div className="tabs-row">{activeFile && <button className="file-tab active"><FileCode2 size={13} />{activeFile.split('/').at(-1)}<span className="modified-dot" /><X size={12} /></button>}<button className="new-tab" aria-label="New tab"><Plus size={13} /></button>{runState === 'running' && <div className="tabs-presence">{agents.filter((agent) => agent.status !== 'queued' && agent.status !== 'done').slice(0, 2).map((agent) => <span className={`presence-mini ${agent.id}`} key={agent.id}>{agent.monogram}</span>)}</div>}</div>
+                  <div className="tabs-row">{activeFile && <span className="file-tab active"><FileCode2 size={13} />{activeFile.split('/').at(-1)}<span className="modified-dot" /></span>}{runState === 'running' && <div className="tabs-presence">{agents.filter((agent) => agent.status !== 'queued' && agent.status !== 'done').slice(0, 2).map((agent) => <span className={`presence-mini ${agent.id}`} key={agent.id}>{agent.monogram}</span>)}</div>}</div>
                   <div className="breadcrumb-row"><span>generated-project</span>{activeFile && <><ChevronRight size={11} /><strong>{activeFile}</strong></>}</div>
                   <div className="code-scroll">{!activeFile && <div className="empty-editor"><FileCode2 size={22} /><strong>No generated files yet</strong><span>Start a coding run to populate this workspace.</span></div>}{codeLines.map((line, index) => <div className="code-line" key={`${index}-${line}`}><span className="line-number">{index + 1}</span><code>{line}</code></div>)}
                     {lastCursor && cursorAgent && <div className="live-cursor event-cursor" style={{ '--cursor-color': cursorAgent.color, top: `${46 + (lastCursor.line % 15) * 25}px`, left: `${Math.min(78, 28 + lastCursor.column * 2.2)}%` } as React.CSSProperties}><span className="cursor-caret" /><label>{cursorAgent.name}</label></div>}
@@ -435,9 +449,9 @@ export default function Home() {
                   event.currentTarget.form?.requestSubmit();
                 }
               }} placeholder={config.placeholder} />
-              <div className="composer-controls"><button type="button" className="attach-button" aria-label="Attach context"><Plus size={16} /></button>
+              <div className="composer-controls">
                 {workType === 'coding' ? <button type="button" className={`mode-chip ${executionMode}`} aria-label="Toggle real agent execution" aria-pressed={executionMode === 'harness'} disabled={!liveAvailable || !harnessAvailable} onClick={() => setExecutionMode((current) => current === 'harness' ? 'live' : 'harness')}>{executionMode === 'harness' ? <Code2 size={11} /> : <Radio size={11} />}{executionMode === 'harness' ? 'Coding agents' : 'Model team'}</button> : <span className={`mode-chip ${workType}`}>{workType === 'design' ? <Palette size={11} /> : <Search size={11} />}{workType === 'design' ? 'Design agents' : 'Research agents'}</span>}
-                <span className="team-chip"><Users size={12} /> All agents <ChevronDown size={11} /></span><button type="submit" className="send-button" aria-label="Start team run" disabled={!draft.trim() || !executionAvailable || runState === 'running'}><ArrowUp size={16} /></button>
+                <span className="team-chip"><Users size={12} /> {agents.length} agents</span><button type="submit" className="send-button" aria-label="Start team run" disabled={!draft.trim() || !executionAvailable || runState === 'running'}><ArrowUp size={16} /></button>
               </div></form>{composerOpen && <p><span>Enter</span> to send · Shift+Enter for a new line</p>}</section>
           </section>
 
