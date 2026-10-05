@@ -42,9 +42,9 @@ test('retry keeps partial files even when retry fails', async ({ page }) => {
   await stream(page, [file, { type: 'error', message: 'Interrupted' }]);
   await start(page);
   await expect(page.locator('.code-scroll')).toContainText('Hello');
-  await expect(page.locator('.live-pill')).toHaveText('Paused');
+  await expect(page.locator('.live-pill')).toHaveText('Interrupted');
   await stream(page, [{ type: 'error', message: 'Retry failed' }]);
-  await page.getByTitle('Start run', { exact: true }).click();
+  await page.getByRole('button', { name: 'Retry run', exact: true }).click();
   await expect(page.locator('.activity-feed')).toContainText('Retry failed');
   await expect(page.locator('.code-scroll')).toContainText('Hello');
 });
@@ -62,7 +62,7 @@ test('new mission replaces old artifacts only after new output', async ({ page }
 
 test('early EOF unlocks workspace and explains failure', async ({ page }) => {
   await stream(page, [{ type: 'run', message: 'Started', progress: 5 }]); await start(page);
-  await expect(page.locator('.live-pill')).toHaveText('Paused');
+  await expect(page.locator('.live-pill')).toHaveText('Interrupted');
   await expect(page.locator('.activity-feed')).toContainText('stream ended before');
   await expect(page.getByRole('button', { name: 'Design', exact: true })).toBeEnabled();
 });
@@ -168,4 +168,13 @@ test('a revision event replaces draft artifacts instead of merging', async ({ pa
   await start(page);
   await expect(page.locator('.code-scroll')).toContainText('Revised');
   await expect(page.locator('.file-tree')).not.toContainText('hello.txt');
+});
+
+test('stopping a run says it stopped and offers a retry', async ({ page }) => {
+  await page.unroute('**/api/runs');
+  await page.route('**/api/runs', () => { /* never answers: the run stays in flight */ });
+  await start(page);
+  await page.getByRole('button', { name: 'Stop run', exact: true }).click();
+  await expect(page.locator('.live-pill')).toHaveText('Stopped');
+  await expect(page.getByRole('button', { name: 'Retry run', exact: true })).toBeEnabled();
 });

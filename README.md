@@ -9,7 +9,7 @@ Collaboragent is a working product prototype for a shared AI-agent workspace. A 
 - An editable spatial canvas for agent-created shapes, assets, notes, labels, and diagrams.
 - A web-grounded research studio that streams verified sources into a structured, citation-linked paper.
 - A streamed server-sent event protocol for run, agent, task, file, review, and completion events.
-- Interactive mission submission, pausing, restarting, agent inspection, and file selection.
+- Interactive mission submission, stopping, retrying (output merges into existing artifacts), agent inspection, and file selection.
 - Real AI SDK v7 execution across Claude, Gemini, and OpenAI/Codex models.
 - Claude Code and Codex harness adapters, plus a provider readiness endpoint.
 

@@ -3,7 +3,7 @@
 import {
   Activity, ArrowUp, BookOpen, Bot, Check, ChevronDown, ChevronRight, CircleDot,
   Clock3, Code2, Command, FileCode2, Files, GitBranch, LayoutGrid, Library,
-  MessageSquareText, MoreHorizontal, Palette, PanelLeftClose, Pause, PenTool,
+  MessageSquareText, MoreHorizontal, Palette, PanelLeftClose, PenTool, RotateCcw, Square,
   Play, Plus, Radio, Search, Settings, ShieldCheck, Sparkles, Users,
   WandSparkles, X, Zap, CheckCircle2,
 } from 'lucide-react';
@@ -62,7 +62,16 @@ function baseAgents(workType: WorkType): AgentView[] {
   }));
 }
 
-type RunState = 'idle' | 'running' | 'paused' | 'complete';
+// A stopped or failed run cannot be resumed mid-stage: Retry starts the
+// mission again and merges new output into the artifacts already on screen.
+type RunState = 'idle' | 'running' | 'stopped' | 'failed' | 'complete';
+
+const RUN_LABELS: Record<Exclude<RunState, 'running'>, { pill: string; mission: string }> = {
+  idle: { pill: 'Idle', mission: 'Awaiting task' },
+  stopped: { pill: 'Stopped', mission: 'Stopped' },
+  failed: { pill: 'Interrupted', mission: 'Interrupted' },
+  complete: { pill: 'Run complete', mission: 'Complete' },
+};
 type ExecutionMode = 'live' | 'harness';
 
 function formatStatus(status: AgentView['status'], workType: WorkType) {
@@ -157,7 +166,7 @@ export default function Home() {
       setRunState('complete');
       setAgents((current) => current.map((agent) => ({ ...agent, status: 'done', progress: 100 })));
     }
-    if (runEvent.type === 'error') setRunState('paused');
+    if (runEvent.type === 'error') setRunState('failed');
   }, []);
 
   const startRun = useCallback(async (nextMission: string, nextMode: ExecutionMode, nextWorkType: WorkType) => {
@@ -279,7 +288,7 @@ export default function Home() {
   const selectedExecutionMode: ExecutionMode = workType === 'coding' ? executionMode : 'live';
   const executionAvailable = selectedExecutionMode === 'harness' ? harnessAvailable : liveAvailable;
   const toggleRun = () => {
-    if (runState === 'running') { controllerRef.current?.abort(); setRunState('paused'); return; }
+    if (runState === 'running') { controllerRef.current?.abort(); setRunState('stopped'); return; }
     const nextMission = mission.trim() || draft.trim();
     const nextMode = activeRunMode ?? selectedExecutionMode;
     const modeAvailable = nextMode === 'harness' ? harnessAvailable : liveAvailable;
@@ -289,6 +298,7 @@ export default function Home() {
     event.preventDefault();
     if (draft.trim() && executionAvailable && runState !== 'running') void startRun(draft.trim(), selectedExecutionMode, workType);
   };
+  const runToggleLabel = runState === 'running' ? 'Stop run' : runState === 'idle' ? 'Start run' : 'Retry run';
   const taskState = (threshold: number, activeAt: number) => progress >= threshold ? 'done' : progress >= activeAt ? 'active' : 'waiting';
   const cursorAgent = lastCursor ? agents.find((agent) => agent.id === lastCursor.agentId) : undefined;
   const ModeIcon = config.icon;
@@ -320,7 +330,7 @@ export default function Home() {
             <div><div className="project-name-row"><strong>Agent workspace</strong><ChevronDown size={14} /></div><span className="branch-label"><ModeIcon size={11} /> {config.title}</span></div>
           </div>
           <div className="topbar-actions">
-            <div className={`live-pill ${activeRunMode ?? 'idle'}`}><Radio size={12} /> {runState === 'running' ? activeModeLabel : runState === 'complete' ? 'Run complete' : runState === 'paused' ? 'Paused' : 'Idle'}</div>
+            <div className={`live-pill ${activeRunMode ?? 'idle'}`}><Radio size={12} /> {runState === 'running' ? activeModeLabel : RUN_LABELS[runState].pill}</div>
             <div className="avatar-stack" aria-label="Four agents in this room">{agents.slice(0, 3).map((agent) => <AgentAvatar key={agent.id} agent={agent} small />)}<span className="stack-more">+1</span></div>
             <button className="ghost-button" disabled={workType === 'design' && designElements.length === 0} onClick={workType === 'design' ? () => downloadDesignBoard(designTitle, designElements) : undefined}>{workType === 'research' ? <Library size={15} /> : workType === 'design' ? <Palette size={15} /> : <Code2 size={15} />}{workType === 'coding' ? 'Repository' : workType === 'design' ? 'Export board' : 'Source library'}</button>
             <button className="share-button"><Users size={15} /> Share room</button>
@@ -362,7 +372,7 @@ export default function Home() {
           <section className="canvas-column">
             <section className="mission-card">
               <div className="mission-topline"><div className="mission-icon"><WandSparkles size={17} /></div><div className="mission-copy">
-                <div className="mission-label-row"><span>{config.eyebrow}</span><span className="mission-status"><span /> {runState === 'running' ? 'In progress' : runState === 'complete' ? 'Complete' : runState === 'paused' ? 'Paused' : 'Awaiting task'}</span></div>
+                <div className="mission-label-row"><span>{config.eyebrow}</span><span className="mission-status"><span /> {runState === 'running' ? 'In progress' : RUN_LABELS[runState].mission}</span></div>
                 <h1>{mission || config.emptyMission}</h1>
               </div><button className="more-button" aria-label="Mission menu"><MoreHorizontal size={18} /></button></div>
               <div className="mission-progress-row"><div className="large-progress"><span style={{ width: `${progress}%` }} /></div><strong>{progress}%</strong></div>
@@ -405,7 +415,7 @@ export default function Home() {
           </section>
 
           <aside className="activity-panel">
-            <div className="activity-heading"><div><p className="eyebrow">OBSERVABILITY</p><h2>Live activity</h2></div><button className={`run-toggle ${runState}`} onClick={toggleRun} title={runState === 'running' ? 'Pause run' : 'Start run'} disabled={runState !== 'running' && (!mission.trim() || !(activeRunMode === 'harness' ? harnessAvailable : liveAvailable))}>{runState === 'running' ? <Pause size={14} /> : <Play size={14} />}</button></div>
+            <div className="activity-heading"><div><p className="eyebrow">OBSERVABILITY</p><h2>Live activity</h2></div><button className={`run-toggle ${runState}`} onClick={toggleRun} title={runToggleLabel} aria-label={runToggleLabel} disabled={runState !== 'running' && (!mission.trim() || !(activeRunMode === 'harness' ? harnessAvailable : liveAvailable))}>{runState === 'running' ? <Square size={13} /> : runState === 'idle' ? <Play size={14} /> : <RotateCcw size={14} />}</button></div>
             <div className="summary-strip">{[agents.filter((agent) => agent.status !== 'queued').length, artifactCount, thirdMetric].map((value, index) => <div key={summaryLabels[index]}><strong>{value}</strong><span>{summaryLabels[index]}</span></div>)}</div>
             <div className="activity-feed">{activity.length === 0 && <div className="empty-activity"><Activity size={20} /><strong>No agent activity yet</strong><span>Plans, searches, edits, and reviews will stream here.</span></div>}
               {activity.map((item, index) => { const agent = agents.find((candidate) => candidate.id === item.agentId); return <article className="activity-item" key={item.id}><div className="timeline-column">{agent ? <AgentAvatar agent={agent} small /> : <span className="system-event"><Activity size={13} /></span>}{index < activity.length - 1 && <span className="timeline-line" />}</div><div className="activity-copy"><div className="activity-meta"><strong>{agent?.name ?? 'Collaboragent'}</strong>{item.model && <em>{item.model.split('/').at(-1)}</em>}<span>{relativeTime(item)}</span></div><p>{item.message}</p>{item.detail && <small>{item.detail}</small>}{item.file && <button className="file-change" onClick={() => setActiveFile(item.file as string)}><FileCode2 size={12} />{item.file}<ChevronRight size={11} /></button>}{item.source && <a className="file-change source-change" href={item.source.url} target="_blank" rel="noreferrer"><BookOpen size={12} />{item.source.publisher}<ChevronRight size={11} /></a>}</div></article>; })}
