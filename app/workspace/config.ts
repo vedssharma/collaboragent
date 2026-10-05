@@ -1,11 +1,12 @@
 import { BookOpen, Code2, Palette } from 'lucide-react';
 import type { AgentId, AgentView, RunEvent, WorkType } from '@/lib/types';
 
+// Agent colors are theme tokens (see globals.css) so they adapt to light and dark mode.
 export const AGENT_IDENTITIES = {
-  claude: { name: 'Claude', provider: 'Anthropic', monogram: 'C', color: '#d36b4c', softColor: '#fff1eb' },
-  codex: { name: 'Codex', provider: 'OpenAI', monogram: 'O', color: '#177c69', softColor: '#eaf8f4' },
-  gemini: { name: 'Gemini', provider: 'Google', monogram: 'G', color: '#5a6ee8', softColor: '#edf0ff' },
-  reviewer: { name: 'Sentinel', provider: 'Collaboragent', monogram: 'S', color: '#9a6b26', softColor: '#fff6df' },
+  claude: { name: 'Claude', provider: 'Anthropic', monogram: 'C', color: 'var(--agent-claude)', softColor: 'var(--agent-claude-soft)' },
+  codex: { name: 'Codex', provider: 'OpenAI', monogram: 'O', color: 'var(--agent-codex)', softColor: 'var(--agent-codex-soft)' },
+  gemini: { name: 'Gemini', provider: 'Google', monogram: 'G', color: 'var(--agent-gemini)', softColor: 'var(--agent-gemini-soft)' },
+  reviewer: { name: 'Sentinel', provider: 'Collaboragent', monogram: 'S', color: 'var(--agent-reviewer)', softColor: 'var(--agent-reviewer-soft)' },
 } as const;
 
 export const WORK_CONFIG = {

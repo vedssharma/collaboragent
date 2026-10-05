@@ -10,8 +10,9 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
 });
 
-for (const workspace of ['Coding', 'Design', 'Research']) {
-  test(`${workspace} workspace has no serious accessibility violations`, async ({ page }) => {
+for (const workspace of ['Coding', 'Design', 'Research']) for (const colorScheme of ['light', 'dark'] as const) {
+  test(`${workspace} workspace has no serious accessibility violations in ${colorScheme} mode`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme });
     await page.locator('.work-type-tabs button', { hasText: workspace }).click();
     const results = await new AxeBuilder({ page }).analyze();
     const serious = results.violations

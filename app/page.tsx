@@ -1,6 +1,6 @@
 'use client';
 
-import { Download, ImageDown, LayoutGrid, Library, Palette, PanelLeftClose, Radio, Settings } from 'lucide-react';
+import { Download, ImageDown, Library, Palette, PanelLeftClose, Radio, Settings } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DesignCanvas } from '@/app/design-canvas';
 import { ProviderConnections } from '@/app/provider-connections';
@@ -56,7 +56,6 @@ export default function Home() {
 
   const mission = missions[workType];
   const draft = drafts[workType];
-  const config = WORK_CONFIG[workType];
 
   const clearArtifacts = useCallback((type: WorkType) => {
     if (type === 'coding') { setFiles(EMPTY_FILES); setLastCursor(null); }
@@ -230,7 +229,6 @@ export default function Home() {
   };
   const selectFile = (path: string) => setFiles((current) => ({ ...current, active: path }));
 
-  const ModeIcon = config.icon;
   const thirdMetric = workType === 'research' ? researchPaper?.sections.length ?? 0 : checks ? `${checks.passed}/${checks.total}` : '—';
   const summaryLabels = workType === 'coding' ? ['Agents', 'Files', 'Checks'] : workType === 'design' ? ['Agents', 'Assets', 'Checks'] : ['Agents', 'Sources', 'Sections'];
   const summaryValues = [agents.filter((agent) => agent.status !== 'queued').length, artifactCount, thirdMetric];
@@ -238,21 +236,22 @@ export default function Home() {
 
   return (
     <main className={`app-shell mode-${workType}`}>
-      <aside className="icon-rail">
-        <span className="brand-mark" aria-hidden="true"><span /><span /><span /></span>
-        <nav className="rail-nav" aria-label="Primary">
-          <span className="rail-button active" title="Workspace" aria-current="page"><LayoutGrid size={18} /></span>
-        </nav>
-        <div className="rail-bottom"><button className="rail-button" title="Settings" aria-label="Settings" onClick={() => setConnectionsOpen(true)}><Settings size={18} /></button></div>
-      </aside>
-
       <section className="workspace-shell">
         <header className="topbar">
           <div className="project-identity">
-            <button className="collapse-button" aria-label={agentPanelOpen ? 'Hide agent room' : 'Show agent room'} aria-pressed={!agentPanelOpen} onClick={() => setAgentPanelOpen((open) => !open)}><PanelLeftClose size={17} /></button>
-            <div className="project-icon"><ModeIcon size={16} /></div>
-            <div><div className="project-name-row"><strong>Agent workspace</strong></div><span className="branch-label"><ModeIcon size={11} /> {config.title}</span></div>
+            <button className="collapse-button" aria-label={agentPanelOpen ? 'Hide agent room' : 'Show agent room'} aria-pressed={!agentPanelOpen} onClick={() => setAgentPanelOpen((open) => !open)}><PanelLeftClose size={18} /></button>
+            <div className="wordmark"><span className="brand-mark" aria-hidden="true" /><strong>Collaboragent</strong></div>
           </div>
+          <nav className="work-type-tabs" aria-label="Workspace type">
+            {(Object.keys(WORK_CONFIG) as WorkType[]).map((type) => {
+              const TypeIcon = WORK_CONFIG[type].icon;
+              const count = type === 'coding' ? files.order.length : type === 'design' ? designElements.length : researchSources.length;
+              return <button key={type} className={workType === type ? 'active' : ''} onClick={() => switchWorkType(type)}
+                disabled={runState === 'running' && workType !== type} aria-current={workType === type ? 'page' : undefined}>
+                <TypeIcon size={15} /><span>{WORK_CONFIG[type].label}</span>{workType === type && count > 0 && <em>{count}</em>}
+              </button>;
+            })}
+          </nav>
           <div className="topbar-actions">
             <div className={`live-pill ${activeRunMode ?? 'idle'}`}><Radio size={12} /> {runState === 'running' ? activeModeLabel : RUN_LABELS[runState].pill}</div>
             <div className="avatar-stack" aria-label="Four agents in this room">{agents.slice(0, 3).map((agent) => <AgentAvatar key={agent.id} agent={agent} small />)}<span className="stack-more">+1</span></div>
@@ -260,19 +259,9 @@ export default function Home() {
             {workType === 'design' && <button className="ghost-button" disabled={designElements.length === 0} onClick={() => downloadDesignBoard(designTitle, designElements)}><Palette size={15} />Export board</button>}
             {workType === 'design' && <button className="ghost-button" disabled={designElements.length === 0} onClick={() => { void downloadDesignBoardPng(designTitle, designElements).catch(() => undefined); }}><ImageDown size={15} />Export PNG</button>}
             {workType === 'research' && <button className="ghost-button" disabled={researchSources.length === 0} onClick={showSourceLibrary}><Library size={15} />Source library</button>}
+            <button className="settings-button" title="Settings" aria-label="Settings" onClick={() => setConnectionsOpen(true)}><Settings size={18} /></button>
           </div>
         </header>
-
-        <nav className="work-type-tabs" aria-label="Workspace type">
-          {(Object.keys(WORK_CONFIG) as WorkType[]).map((type) => {
-            const TypeIcon = WORK_CONFIG[type].icon;
-            const count = type === 'coding' ? files.order.length : type === 'design' ? designElements.length : researchSources.length;
-            return <button key={type} className={workType === type ? 'active' : ''} onClick={() => switchWorkType(type)}
-              disabled={runState === 'running' && workType !== type} aria-current={workType === type ? 'page' : undefined}>
-              <TypeIcon size={14} /><span>{WORK_CONFIG[type].label}</span>{workType === type && <em>{count}</em>}
-            </button>;
-          })}
-        </nav>
 
         <div className={`work-area ${agentPanelOpen ? '' : 'agents-hidden'}`}>
           <AgentPanel agents={agents} workType={workType} runState={runState} selectedAgent={selectedAgent} onSelectAgent={setSelectedAgent}

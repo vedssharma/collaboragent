@@ -7,8 +7,8 @@ import { formatStatus, type RunState } from './config';
 export function AgentAvatar({ agent, small = false }: { agent: AgentView; small?: boolean }) {
   return (
     <span className={`agent-avatar ${small ? 'agent-avatar-small' : ''}`}
-      style={{ background: agent.softColor, color: agent.color, borderColor: `${agent.color}35` }} aria-label={agent.name}>
-      {agent.monogram}<span className="avatar-status" style={{ background: agent.color }} />
+      style={{ '--agent': agent.color, '--agent-soft': agent.softColor } as React.CSSProperties} aria-label={agent.name}>
+      {agent.monogram}<span className="avatar-status" />
     </span>
   );
 }
@@ -27,7 +27,7 @@ export function AgentPanel({ agents, workType, runState, selectedAgent, onSelect
   const harnessReady = workType === 'coding' && harnessAvailable;
   return (
     <aside className="agent-panel">
-      <div className="panel-heading"><div><p className="eyebrow">COLLABORATORS</p><h2>Agent room</h2></div></div>
+      <div className="panel-heading"><h2>Agent room</h2></div>
       <div className="room-status"><span className="pulse-dot" />{runState === 'running' ? 'Team is collaborating' : runState === 'complete' ? 'Team is ready for review' : 'Team is standing by'}</div>
       <div className="agent-list">{agents.map((agent) => (
         <button key={agent.id} className={`agent-card ${selectedAgent === agent.id ? 'selected' : ''}`} onClick={() => onSelectAgent(agent.id)}>
