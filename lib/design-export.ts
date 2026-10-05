@@ -1,4 +1,5 @@
 import type { DesignElement } from './types';
+import { downloadBlob, slugify } from './zip';
 
 function escapeXml(value: string) {
   return value.replace(/[&<>"']/g, (character) => ({
@@ -42,12 +43,27 @@ export function designBoardSvg(title: string, elements: DesignElement[]) {
 }
 
 export function downloadDesignBoard(title: string, elements: DesignElement[]) {
-  const url = URL.createObjectURL(new Blob([designBoardSvg(title, elements)], { type: 'image/svg+xml' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `${title.replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'design-board'}.svg`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadBlob(new Blob([designBoardSvg(title, elements)], { type: 'image/svg+xml' }), `${slugify(title, 'design-board')}.svg`);
+}
+
+/** Rasterizes the standalone SVG at 2x for sharing where SVG is not accepted. */
+export async function downloadDesignBoardPng(title: string, elements: DesignElement[], scale = 2) {
+  const svgUrl = URL.createObjectURL(new Blob([designBoardSvg(title, elements)], { type: 'image/svg+xml' }));
+  try {
+    const image = new Image();
+    image.decoding = 'async';
+    image.src = svgUrl;
+    await image.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = 1000 * scale;
+    canvas.height = 700 * scale;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Canvas is not available in this browser.');
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+    if (!png) throw new Error('PNG export failed.');
+    downloadBlob(png, `${slugify(title, 'design-board')}.png`);
+  } finally {
+    URL.revokeObjectURL(svgUrl);
+  }
 }

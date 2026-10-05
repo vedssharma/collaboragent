@@ -1023,9 +1023,6 @@ button {
   color: #35483f;
 }
 
-.code-line:nth-child(3n + 1) code { color: #705d91; }
-.code-line:nth-child(5n + 2) code { color: #36776b; }
-
 .empty-editor {
   display: flex;
   height: 100%;
@@ -1165,6 +1162,7 @@ button {
 .send-button:disabled { cursor: default; opacity: 0.4; }
 
 .team-chip,
+.refine-chip,
 .mode-chip {
   display: flex;
   height: 29px;
@@ -1699,3 +1697,50 @@ button {
 .provider-dialog a { color: var(--green); }
 .provider-dialog code { overflow-wrap: anywhere; font-size: 12px; }
 .provider-dialog summary { cursor: pointer; font-size: 13px; }
+.access-form { display: flex; gap: 8px; }
+.access-form input { flex: 1; min-width: 0; height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+
+.work-area.agents-hidden { grid-template-columns: minmax(500px, 1fr) 326px; }
+.work-area.agents-hidden .agent-panel { display: none; }
+@media (max-width: 1260px) {
+  .work-area.agents-hidden { grid-template-columns: minmax(0, 1fr); }
+}
+.collapse-button[aria-pressed='true'] { color: var(--green); }
+.more-button:disabled { cursor: not-allowed; opacity: 0.4; }
+.refine-chip { background: transparent; cursor: pointer; font-weight: 650; }
+.refine-chip.active { border-color: #d9e8e0; background: #eff8f3; color: var(--green); }
+
+/* Syntax highlighting (highlight.js token classes) */
+.code-line code.hljs { background: transparent; padding: 0; }
+.hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-doctag { color: #8a3f9e; }
+.hljs-string, .hljs-attr + .hljs-string, .hljs-regexp, .hljs-template-variable { color: #1b7a52; }
+.hljs-number, .hljs-literal, .hljs-symbol, .hljs-bullet { color: #b05a1e; }
+.hljs-title, .hljs-title.function_, .hljs-section { color: #2d5fb8; }
+.hljs-title.class_, .hljs-type, .hljs-class .hljs-title { color: #a15c00; }
+.hljs-attr, .hljs-attribute, .hljs-property, .hljs-variable, .hljs-params { color: #2f6f8f; }
+.hljs-name, .hljs-tag, .hljs-selector-class, .hljs-selector-id { color: #b4373f; }
+.hljs-comment, .hljs-quote, .hljs-meta { color: #8b948f; font-style: italic; }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 700; }
+
+.changes-toggle { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; padding: 2px 7px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--muted); font-size: 9px; cursor: pointer; }
+.changes-toggle.active { border-color: #d9e8e0; background: var(--green-soft); color: var(--green); }
+.code-line.diff-added { background: #e9f7ee; }
+.code-line.diff-added code { color: #17633f; }
+.code-line.diff-removed { background: #fdeceb; }
+.code-line.diff-removed code { color: #9b2c2c; text-decoration: line-through; text-decoration-color: #e3a4a4; }
+.diff-notice { padding: 10px 16px; color: var(--muted); font-size: 11px; }
+.canvas-element:focus-visible { outline: 2px solid #6d7ee8; outline-offset: 2px; }
+.canvas-text-editor { width: 100%; height: 100%; padding: 0; border: 0; background: transparent; font: inherit; text-align: inherit; resize: none; outline: none; }
+.canvas-resize-handle { position: absolute; right: -6px; bottom: -6px; width: 11px; height: 11px; border: 2px solid #6d7ee8; border-radius: 3px; background: #fff; cursor: nwse-resize; touch-action: none; }
+.design-toolbar-group button:disabled { cursor: not-allowed; opacity: 0.35; }
+
+/* Accessibility: secondary text meets WCAG AA contrast (4.5:1) on every panel background. */
+.branch-label, .live-pill.idle, .stack-more, .work-type-tabs button, .eyebrow,
+.status-label.queued, .agent-role, .connection-row em, .connection-card p,
+.mission-label-row > span:first-child, .mission-progress-row strong, .task-flow-item span,
+.sync-state, .working-count, .tree-heading span, .empty-files, .breadcrumb-row span,
+.empty-editor span, .editor-footer span, .summary-strip span, .empty-activity span,
+.activity-footer, .asset-tools button span, .zoom-controls span, .research-panel-title,
+.empty-research-paper p { color: #59625d; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

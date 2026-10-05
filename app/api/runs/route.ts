@@ -1,8 +1,10 @@
 import { z } from 'zod';
-import type { RunEvent } from '@/lib/types';
+import type { RunEvent, RunEventInput } from '@/lib/types';
 import { runLiveCollaboration } from '@/lib/live-collaboration';
 import { runHarnessCollaboration } from '@/lib/harness-collaboration';
 import { getExecutionCapabilities } from '@/lib/provider-config';
+import { checkAccess, runLimiter } from '@/lib/access-control';
+import { refinementSchema } from '@/lib/refinement';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -12,9 +14,13 @@ const runRequest = z.object({
   prompt: z.string().trim().min(1).max(4_000),
   mode: z.enum(['live', 'harness']),
   workType: z.enum(['coding', 'design', 'research']).default('coding'),
+  refine: refinementSchema.optional(),
 }).strict();
 
 export async function POST(request: Request) {
+  const access = checkAccess(request);
+  if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
+
   const parsed = runRequest.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return Response.json(
@@ -22,7 +28,7 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  const { prompt, mode, workType } = parsed.data;
+  const { prompt, mode, workType, refine } = parsed.data;
   if (mode === 'harness' && workType !== 'coding') {
     return Response.json(
       { error: 'Coding harnesses are only available in the coding workspace.' },
@@ -37,6 +43,14 @@ export async function POST(request: Request) {
       : 'Connect AI Gateway in Provider connections before starting the team.' }, { status: 503 });
   }
 
+  const slot = runLimiter.acquire(access.clientKey, mode === 'harness');
+  if (!slot.ok) {
+    return Response.json(
+      { error: slot.error },
+      { status: 429, headers: { 'Retry-After': String(slot.retryAfterSeconds) } },
+    );
+  }
+
   const encoder = new TextEncoder();
   let cancelled = false;
   request.signal.addEventListener('abort', () => {
@@ -47,7 +61,7 @@ export async function POST(request: Request) {
     async start(controller) {
       let eventIndex = 0;
       let closed = false;
-      const send = (eventInput: Omit<RunEvent, 'id' | 'at' | 'mode'>) => {
+      const send = (eventInput: RunEventInput) => {
         if (cancelled || closed) return;
         const payload: RunEvent = {
           ...eventInput,
@@ -65,9 +79,9 @@ export async function POST(request: Request) {
 
       try {
         if (mode === 'harness') {
-          await runHarnessCollaboration({ prompt, signal: request.signal, emit: send });
+          await runHarnessCollaboration({ prompt, refine, signal: request.signal, emit: send });
         } else if (mode === 'live') {
-          await runLiveCollaboration({ prompt, workType, signal: request.signal, emit: send });
+          await runLiveCollaboration({ prompt, workType, refine, signal: request.signal, emit: send });
         }
       } catch (error) {
         if (!cancelled && (error as Error).name !== 'AbortError') {
@@ -87,6 +101,7 @@ export async function POST(request: Request) {
         }
       } finally {
         clearInterval(heartbeat);
+        slot.release();
         if (!cancelled) {
           closed = true;
           controller.close();

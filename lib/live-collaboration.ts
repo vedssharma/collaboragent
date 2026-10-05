@@ -4,16 +4,14 @@ import type {
   DesignElement,
   ResearchPaper,
   ResearchSource,
-  RunEvent,
+  RunEventInput,
   WorkType,
 } from '@/lib/types';
+import { createUsageTracker, resolveModels } from '@/lib/models';
+import { refinementContext, type Refinement } from '@/lib/refinement';
+import { collectSearchUrls, reconcileCitations, verifySources } from '@/lib/research-verification';
 
-export const LIVE_MODELS = {
-  architect: 'anthropic/claude-sonnet-5',
-  researcher: 'google/gemini-3.7-flash',
-  builder: 'openai/gpt-5.3-codex-fast',
-  reviewer: 'openai/gpt-5.6-luna-fast',
-} as const;
+export const LIVE_MODELS = resolveModels();
 
 const planSchema = z
   .object({
@@ -178,7 +176,7 @@ const researchPaperSchema = z
   })
   .strict();
 
-export type LiveEventInput = Omit<RunEvent, 'id' | 'at' | 'mode'>;
+export type LiveEventInput = RunEventInput;
 type EmitLiveEvent = (event: LiveEventInput) => void;
 
 const architect = new ToolLoopAgent({
@@ -310,16 +308,78 @@ function artifactDigest(files: Array<{ path: string; purpose: string; content: s
   }));
 }
 
+type Review = z.infer<typeof reviewSchema>;
+
+/** What the producing agent needs to act on a review, without the checks that already passed. */
+function reviewFeedback(review: Review) {
+  return JSON.stringify({
+    summary: review.summary,
+    failedChecks: review.checks.filter((check) => !check.passed),
+    risks: review.risks,
+    nextStep: review.nextStep,
+  }, null, 2);
+}
+
+function emitReview(emit: EmitLiveEvent, review: Review, {
+  approved,
+  changesRequested,
+  revised,
+  progress,
+}: { approved: string; changesRequested: string; revised: boolean; progress: number }) {
+  const passed = review.checks.filter((check) => check.passed).length;
+  emit({
+    type: 'activity',
+    agentId: 'reviewer',
+    status: 'done',
+    message: review.verdict === 'approved' ? approved : changesRequested,
+    detail: `${revised ? 'Revised after review · ' : ''}${review.summary} · ${passed}/${review.checks.length} checks passed · quality score ${review.score}/100`,
+    checks: { passed, total: review.checks.length },
+    model: LIVE_MODELS.reviewer,
+    progress,
+    taskId: 'review',
+  });
+}
+
+function emitRevisionStart(emit: EmitLiveEvent, review: Review, message: string, model: string) {
+  emit({
+    type: 'agent-status',
+    agentId: 'codex',
+    status: 'working',
+    message,
+    detail: `Addressing ${review.checks.filter((check) => !check.passed).length} failed checks · ${review.nextStep}`,
+    model,
+    progress: 88,
+    taskId: 'review',
+  });
+}
+
+function emitReReview(emit: EmitLiveEvent, message: string) {
+  emit({
+    type: 'agent-status',
+    agentId: 'reviewer',
+    status: 'reviewing',
+    message,
+    detail: 'Checking whether the revision resolved the earlier findings',
+    model: LIVE_MODELS.reviewer,
+    progress: 93,
+    taskId: 'review',
+  });
+}
+
 async function runCodingCollaboration({
   prompt,
+  refine,
   signal,
   emit,
 }: {
   prompt: string;
+  refine?: Refinement;
   signal: AbortSignal;
   emit: EmitLiveEvent;
 }) {
   ensureNotAborted(signal);
+  const existingWork = refinementContext(refine);
+  const usage = createUsageTracker();
   emit({
     type: 'run',
     message: 'Authenticated multi-provider run started',
@@ -346,16 +406,16 @@ async function runCodingCollaboration({
   });
 
   const [planResult, researchResult] = await Promise.all([
-    architect.generate({
-      prompt: `Mission:\n${prompt}\n\nCreate the implementation plan for this product.`,
+    usage.track(architect.generate({
+      prompt: `Mission:\n${prompt}\n\nCreate the implementation plan for this product.${existingWork}`,
       abortSignal: signal,
       timeout: 120_000,
-    }),
-    researcher.generate({
+    })),
+    usage.track(researcher.generate({
       prompt: `Mission:\n${prompt}\n\nDevelop a focused UX research brief that the architect and builder can act on immediately.`,
       abortSignal: signal,
       timeout: 120_000,
-    }),
+    })),
   ]);
 
   ensureNotAborted(signal);
@@ -391,31 +451,34 @@ async function runCodingCollaboration({
     taskId: 'build',
   });
 
-  const buildResult = await builder.generate({
-    prompt: `Mission:\n${prompt}\n\nArchitecture plan:\n${JSON.stringify(plan, null, 2)}\n\nUX research:\n${JSON.stringify(research, null, 2)}\n\nBuild a coherent implementation that satisfies the plan.`,
+  const buildResult = await usage.track(builder.generate({
+    prompt: `Mission:\n${prompt}\n\nArchitecture plan:\n${JSON.stringify(plan, null, 2)}\n\nUX research:\n${JSON.stringify(research, null, 2)}\n\nBuild a coherent implementation that satisfies the plan.${existingWork}`,
     abortSignal: signal,
     timeout: 180_000,
-  });
+  }));
 
   ensureNotAborted(signal);
-  const build = buildResult.output;
-  for (let index = 0; index < build.files.length; index += 1) {
-    const file = build.files[index];
-    emit({
-      type: 'file',
-      agentId: 'codex',
-      status: 'working',
-      message: `Created ${file.path}`,
-      detail: file.purpose,
-      file: file.path,
-      content: file.content,
-      language: file.language,
-      model: LIVE_MODELS.builder,
-      cursor: { line: Math.min(24, file.content.split('\n').length), column: 8 },
-      progress: 48 + Math.round(((index + 1) / build.files.length) * 28),
-      taskId: 'build',
-    });
-  }
+  let build = buildResult.output;
+  const emitFiles = (verb: string, start: number, span: number) => {
+    for (let index = 0; index < build.files.length; index += 1) {
+      const file = build.files[index];
+      emit({
+        type: 'file',
+        agentId: 'codex',
+        status: 'working',
+        message: `${verb} ${file.path}`,
+        detail: file.purpose,
+        file: file.path,
+        content: file.content,
+        language: file.language,
+        model: LIVE_MODELS.builder,
+        cursor: { line: Math.min(24, file.content.split('\n').length), column: 8 },
+        progress: start + Math.round(((index + 1) / build.files.length) * span),
+        taskId: 'build',
+      });
+    }
+  };
+  emitFiles('Created', 48, 28);
   emit({
     type: 'activity',
     agentId: 'codex',
@@ -437,30 +500,42 @@ async function runCodingCollaboration({
     taskId: 'review',
   });
 
-  const reviewResult = await reviewer.generate({
-    prompt: `Mission:\n${prompt}\n\nArchitecture:\n${JSON.stringify(plan, null, 2)}\n\nUX research:\n${JSON.stringify(research, null, 2)}\n\nImplementation artifacts:\n${JSON.stringify(artifactDigest(build.files), null, 2)}\n\nReview these artifacts now.`,
-    abortSignal: signal,
-    timeout: 120_000,
-  });
+  const reviewBuild = async () => {
+    const result = await usage.track(reviewer.generate({
+      prompt: `Mission:\n${prompt}\n\nArchitecture:\n${JSON.stringify(plan, null, 2)}\n\nUX research:\n${JSON.stringify(research, null, 2)}\n\nImplementation artifacts:\n${JSON.stringify(artifactDigest(build.files), null, 2)}\n\nReview these artifacts now.`,
+      abortSignal: signal,
+      timeout: 120_000,
+    }));
+    ensureNotAborted(signal);
+    return result.output;
+  };
+  const reviewLabels = { approved: 'Quality review approved', changesRequested: 'Quality review found follow-up work' };
 
-  ensureNotAborted(signal);
-  const review = reviewResult.output;
-  const passedChecks = review.checks.filter((check) => check.passed).length;
-  emit({
-    type: 'activity',
-    agentId: 'reviewer',
-    status: 'done',
-    message: review.verdict === 'approved' ? 'Quality review approved' : 'Quality review found follow-up work',
-    detail: `${review.summary} · ${passedChecks}/${review.checks.length} checks passed`,
-    checks: { passed: passedChecks, total: review.checks.length },
-    model: LIVE_MODELS.reviewer,
-    progress: 96,
-    taskId: 'review',
-  });
+  let review = await reviewBuild();
+  let revised = false;
+  if (review.verdict === 'changes-requested') {
+    emitReview(emit, review, { ...reviewLabels, revised, progress: 86 });
+    emitRevisionStart(emit, review, 'Revising the implementation after review', LIVE_MODELS.builder);
+    const revision = await usage.track(builder.generate({
+      prompt: `Mission:\n${prompt}\n\nArchitecture plan:\n${JSON.stringify(plan, null, 2)}\n\nCurrent files:\n${JSON.stringify(build.files, null, 2)}\n\nIndependent review feedback:\n${reviewFeedback(review)}\n\nRevise the implementation to resolve every failed check. Return the complete revised file set, keeping paths stable unless a rename is necessary.`,
+      abortSignal: signal,
+      timeout: 180_000,
+    }));
+    ensureNotAborted(signal);
+    build = revision.output;
+    revised = true;
+    // The revised file set replaces the draft so renamed or dropped files disappear.
+    emit({ type: 'activity', agentId: 'codex', status: 'working', message: 'Replacing the draft with the revised files', resetArtifacts: true, model: LIVE_MODELS.builder, progress: 88, taskId: 'review' });
+    emitFiles('Revised', 88, 4);
+    emitReReview(emit, 'Re-reviewing the revised implementation');
+    review = await reviewBuild();
+  }
+  emitReview(emit, review, { ...reviewLabels, revised, progress: 96 });
   emit({
     type: 'complete',
+    usage: usage.totals,
     message: review.verdict === 'approved' ? 'Real agent run complete — artifacts are ready' : 'Real agent run complete — review notes are ready',
-    detail: `${build.files.length} files generated · quality score ${review.score}/100 · ${review.nextStep}`,
+    detail: `${build.files.length} files generated${revised ? ' · revised once after review' : ''} · quality score ${review.score}/100 · ${review.nextStep}`,
     progress: 100,
     taskId: 'ship',
   });
@@ -470,14 +545,18 @@ async function runCodingCollaboration({
 
 async function runDesignCollaboration({
   prompt,
+  refine,
   signal,
   emit,
 }: {
   prompt: string;
+  refine?: Refinement;
   signal: AbortSignal;
   emit: EmitLiveEvent;
 }) {
   ensureNotAborted(signal);
+  const existingWork = refinementContext(refine);
+  const usage = createUsageTracker();
   emit({
     type: 'run',
     message: 'Collaborative design run started',
@@ -504,16 +583,16 @@ async function runDesignCollaboration({
   });
 
   const [directionResult, researchResult] = await Promise.all([
-    designDirector.generate({
-      prompt: `Design mission:\n${prompt}\n\nCreate a focused art direction for this canvas.`,
+    usage.track(designDirector.generate({
+      prompt: `Design mission:\n${prompt}\n\nCreate a focused art direction for this canvas.${existingWork}`,
       abortSignal: signal,
       timeout: 120_000,
-    }),
-    designResearcher.generate({
+    })),
+    usage.track(designResearcher.generate({
       prompt: `Design mission:\n${prompt}\n\nGive the visual team concrete audience, hierarchy, and usability guidance.`,
       abortSignal: signal,
       timeout: 120_000,
-    }),
+    })),
   ]);
 
   ensureNotAborted(signal);
@@ -549,29 +628,32 @@ async function runDesignCollaboration({
     taskId: 'build',
   });
 
-  const boardResult = await designComposer.generate({
-    prompt: `Design mission:\n${prompt}\n\nCreative direction:\n${JSON.stringify(direction, null, 2)}\n\nVisual research:\n${JSON.stringify(research, null, 2)}\n\nCompose the finished collaborative board.`,
+  const boardResult = await usage.track(designComposer.generate({
+    prompt: `Design mission:\n${prompt}\n\nCreative direction:\n${JSON.stringify(direction, null, 2)}\n\nVisual research:\n${JSON.stringify(research, null, 2)}\n\nCompose the finished collaborative board.${existingWork}`,
     abortSignal: signal,
     timeout: 180_000,
-  });
+  }));
 
   ensureNotAborted(signal);
-  const board = boardResult.output;
-  for (let index = 0; index < board.elements.length; index += 1) {
-    const element = board.elements[index] as DesignElement;
-    emit({
-      type: 'canvas',
-      agentId: element.owner,
-      status: 'working',
-      message: `Placed ${element.kind} on the canvas`,
-      detail: element.text || `${element.width}% × ${element.height}% visual element`,
-      designTitle: board.title,
-      element,
-      model: LIVE_MODELS.builder,
-      progress: 44 + Math.round(((index + 1) / board.elements.length) * 34),
-      taskId: 'build',
-    });
-  }
+  let board = boardResult.output;
+  const emitBoard = (verb: string, start: number, span: number) => {
+    for (let index = 0; index < board.elements.length; index += 1) {
+      const element = board.elements[index] as DesignElement;
+      emit({
+        type: 'canvas',
+        agentId: element.owner,
+        status: 'working',
+        message: `${verb} ${element.kind} on the canvas`,
+        detail: element.text || `${element.width}% × ${element.height}% visual element`,
+        designTitle: board.title,
+        element,
+        model: LIVE_MODELS.builder,
+        progress: start + Math.round(((index + 1) / board.elements.length) * span),
+        taskId: 'build',
+      });
+    }
+  };
+  emitBoard('Placed', 44, 34);
   emit({
     type: 'activity',
     agentId: 'codex',
@@ -593,27 +675,42 @@ async function runDesignCollaboration({
     taskId: 'review',
   });
 
-  const reviewResult = await designReviewer.generate({
-    prompt: `Design mission:\n${prompt}\n\nCreative direction:\n${JSON.stringify(direction, null, 2)}\n\nBoard:\n${JSON.stringify(board, null, 2)}\n\nCritique this board now.`,
-    abortSignal: signal,
-    timeout: 120_000,
-  });
-  const review = reviewResult.output;
-  emit({
-    type: 'activity',
-    agentId: 'reviewer',
-    status: 'done',
-    message: review.verdict === 'approved' ? 'Design critique approved' : 'Design critique found follow-up work',
-    checks: { passed: review.checks.filter((check) => check.passed).length, total: review.checks.length },
-    detail: `${review.summary} · quality score ${review.score}/100`,
-    model: LIVE_MODELS.reviewer,
-    progress: 96,
-    taskId: 'review',
-  });
+  const reviewBoard = async () => {
+    const result = await usage.track(designReviewer.generate({
+      prompt: `Design mission:\n${prompt}\n\nCreative direction:\n${JSON.stringify(direction, null, 2)}\n\nBoard:\n${JSON.stringify(board, null, 2)}\n\nCritique this board now.`,
+      abortSignal: signal,
+      timeout: 120_000,
+    }));
+    ensureNotAborted(signal);
+    return result.output;
+  };
+  const reviewLabels = { approved: 'Design critique approved', changesRequested: 'Design critique found follow-up work' };
+
+  let review = await reviewBoard();
+  let revised = false;
+  if (review.verdict === 'changes-requested') {
+    emitReview(emit, review, { ...reviewLabels, revised, progress: 86 });
+    emitRevisionStart(emit, review, 'Recomposing the canvas after critique', LIVE_MODELS.builder);
+    const revision = await usage.track(designComposer.generate({
+      prompt: `Design mission:\n${prompt}\n\nCreative direction:\n${JSON.stringify(direction, null, 2)}\n\nCurrent board:\n${JSON.stringify(board, null, 2)}\n\nDesign critique:\n${reviewFeedback(review)}\n\nRevise the board to resolve every failed check. Return the complete finished board.`,
+      abortSignal: signal,
+      timeout: 180_000,
+    }));
+    ensureNotAborted(signal);
+    board = revision.output;
+    revised = true;
+    // The revised board replaces the first draft rather than merging into it.
+    emit({ type: 'activity', agentId: 'codex', status: 'working', message: 'Replacing the draft with the revised board', resetArtifacts: true, model: LIVE_MODELS.builder, progress: 88, taskId: 'review' });
+    emitBoard('Revised', 88, 4);
+    emitReReview(emit, 'Re-critiquing the revised canvas');
+    review = await reviewBoard();
+  }
+  emitReview(emit, review, { ...reviewLabels, revised, progress: 96 });
   emit({
     type: 'complete',
+    usage: usage.totals,
     message: 'Design run complete — the canvas is ready',
-    detail: `${board.elements.length} visual elements composed · ${review.nextStep}`,
+    detail: `${board.elements.length} visual elements composed${revised ? ' · revised once after critique' : ''} · ${review.nextStep}`,
     progress: 100,
     taskId: 'ship',
   });
@@ -623,14 +720,18 @@ async function runDesignCollaboration({
 
 async function runResearchCollaboration({
   prompt,
+  refine,
   signal,
   emit,
 }: {
   prompt: string;
+  refine?: Refinement;
   signal: AbortSignal;
   emit: EmitLiveEvent;
 }) {
   ensureNotAborted(signal);
+  const existingWork = refinementContext(refine);
+  const usage = createUsageTracker();
   emit({
     type: 'run',
     message: 'Collaborative research run started',
@@ -657,21 +758,26 @@ async function runResearchCollaboration({
   });
 
   const [outlineResult, discoveryResult] = await Promise.all([
-    researchArchitect.generate({
-      prompt: `Research topic:\n${prompt}\n\nDevelop a rigorous paper plan.`,
+    usage.track(researchArchitect.generate({
+      prompt: `Research topic:\n${prompt}\n\nDevelop a rigorous paper plan.${existingWork}`,
       abortSignal: signal,
       timeout: 120_000,
-    }),
-    sourceResearcher.generate({
+    })),
+    usage.track(sourceResearcher.generate({
       prompt: `Research topic:\n${prompt}\n\nSearch the web for a diverse, credible source packet, then synthesize the evidence.`,
       abortSignal: signal,
       timeout: 180_000,
-    }),
+    })),
   ]);
 
   ensureNotAborted(signal);
   const outline = outlineResult.output;
-  const discovery = discoveryResult.output;
+  const searchUrls = collectSearchUrls(discoveryResult.steps);
+  const { verified, rejected } = verifySources(discoveryResult.output.sources, searchUrls);
+  if (verified.length === 0) {
+    throw new Error('The web search returned no sources that match the research packet.');
+  }
+  const discovery = { ...discoveryResult.output, sources: verified };
   emit({
     type: 'activity',
     agentId: 'claude',
@@ -687,7 +793,7 @@ async function runResearchCollaboration({
       type: 'source',
       agentId: 'gemini',
       status: 'working',
-      message: `Verified source ${index + 1}`,
+      message: `Verified source ${index + 1} against search results`,
       detail: `${source.publisher} · ${source.title}`,
       source: source as ResearchSource,
       model: LIVE_MODELS.researcher,
@@ -695,6 +801,18 @@ async function runResearchCollaboration({
       taskId: 'search',
     });
   });
+  if (rejected.length > 0) {
+    emit({
+      type: 'activity',
+      agentId: 'reviewer',
+      status: 'reviewing',
+      message: `Discarded ${rejected.length} source${rejected.length === 1 ? '' : 's'} not returned by web search`,
+      detail: rejected.map((source) => source.url).join(' · ').slice(0, 600),
+      model: LIVE_MODELS.researcher,
+      progress: 47,
+      taskId: 'search',
+    });
+  }
   emit({
     type: 'activity',
     agentId: 'gemini',
@@ -716,21 +834,41 @@ async function runResearchCollaboration({
     taskId: 'build',
   });
 
-  const paperResult = await paperWriter.generate({
-    prompt: `Research topic:\n${prompt}\n\nApproved outline:\n${JSON.stringify(outline, null, 2)}\n\nVerified source packet:\n${JSON.stringify(discovery, null, 2)}\n\nWrite the detailed sourced paper now.`,
+  const paperResult = await usage.track(paperWriter.generate({
+    prompt: `Research topic:\n${prompt}\n\nApproved outline:\n${JSON.stringify(outline, null, 2)}\n\nVerified source packet:\n${JSON.stringify(discovery, null, 2)}\n\nWrite the detailed sourced paper now.${existingWork}`,
     abortSignal: signal,
     timeout: 240_000,
-  });
+  }));
 
   ensureNotAborted(signal);
-  const paper = paperResult.output as ResearchPaper;
+  const sourceIds = new Set(discovery.sources.map((source) => source.id));
+  const checkCitations = (draft: ResearchPaper, progress: number) => {
+    const citations = reconcileCitations(draft, sourceIds);
+    if (citations.removedIds.length > 0 || citations.uncitedSections.length > 0) {
+      emit({
+        type: 'activity',
+        agentId: 'reviewer',
+        status: 'reviewing',
+        message: 'Citation check found unsupported references',
+        detail: [
+          citations.removedIds.length ? `Removed unknown source ids: ${citations.removedIds.join(', ')}` : '',
+          citations.uncitedSections.length ? `Sections without a verified citation: ${citations.uncitedSections.join('; ')}` : '',
+        ].filter(Boolean).join(' · '),
+        model: LIVE_MODELS.reviewer,
+        progress,
+        taskId: 'build',
+      });
+    }
+    return citations;
+  };
+  let citations = checkCitations(paperResult.output as ResearchPaper, 79);
   emit({
     type: 'paper',
     agentId: 'codex',
     status: 'done',
     message: 'Full research paper drafted',
-    detail: `${paper.sections.length} evidence-backed sections with ${discovery.sources.length} verified sources`,
-    paper,
+    detail: `${citations.paper.sections.length} evidence-backed sections with ${discovery.sources.length} verified sources`,
+    paper: citations.paper,
     model: LIVE_MODELS.builder,
     progress: 80,
     taskId: 'build',
@@ -746,27 +884,51 @@ async function runResearchCollaboration({
     taskId: 'review',
   });
 
-  const reviewResult = await researchReviewer.generate({
-    prompt: `Original topic:\n${prompt}\n\nResearch plan:\n${JSON.stringify(outline, null, 2)}\n\nVerified sources:\n${JSON.stringify(discovery.sources, null, 2)}\n\nPaper:\n${JSON.stringify(paper, null, 2)}\n\nReview this paper now.`,
-    abortSignal: signal,
-    timeout: 120_000,
-  });
-  const review = reviewResult.output;
-  emit({
-    type: 'activity',
-    agentId: 'reviewer',
-    status: 'done',
-    message: review.verdict === 'approved' ? 'Research review approved' : 'Research review found follow-up work',
-    checks: { passed: review.checks.filter((check) => check.passed).length, total: review.checks.length },
-    detail: `${review.summary} · quality score ${review.score}/100`,
-    model: LIVE_MODELS.reviewer,
-    progress: 96,
-    taskId: 'review',
-  });
+  const reviewPaper = async () => {
+    const result = await usage.track(researchReviewer.generate({
+      prompt: `Original topic:\n${prompt}\n\nResearch plan:\n${JSON.stringify(outline, null, 2)}\n\nVerified sources:\n${JSON.stringify(discovery.sources, null, 2)}\n\nPaper:\n${JSON.stringify(citations.paper, null, 2)}\n\n${citations.uncitedSections.length ? `Automated citation check: these sections cite no verified source: ${citations.uncitedSections.join('; ')}.\n\n` : ''}Review this paper now.`,
+      abortSignal: signal,
+      timeout: 120_000,
+    }));
+    ensureNotAborted(signal);
+    return result.output;
+  };
+  const reviewLabels = { approved: 'Research review approved', changesRequested: 'Research review found follow-up work' };
+
+  let review = await reviewPaper();
+  let revised = false;
+  if (review.verdict === 'changes-requested') {
+    emitReview(emit, review, { ...reviewLabels, revised, progress: 86 });
+    emitRevisionStart(emit, review, 'Revising the paper after editorial review', LIVE_MODELS.builder);
+    const revision = await usage.track(paperWriter.generate({
+      prompt: `Research topic:\n${prompt}\n\nApproved outline:\n${JSON.stringify(outline, null, 2)}\n\nVerified source packet:\n${JSON.stringify(discovery, null, 2)}\n\nCurrent paper:\n${JSON.stringify(citations.paper, null, 2)}\n\nEditorial review:\n${reviewFeedback(review)}\n\nRevise the paper to resolve every failed check. Cite only source ids from the packet. Return the complete revised paper.`,
+      abortSignal: signal,
+      timeout: 240_000,
+    }));
+    ensureNotAborted(signal);
+    citations = checkCitations(revision.output as ResearchPaper, 90);
+    revised = true;
+    emit({
+      type: 'paper',
+      agentId: 'codex',
+      status: 'done',
+      message: 'Revised paper delivered',
+      detail: `${citations.paper.sections.length} sections revised against the editorial review`,
+      paper: citations.paper,
+      model: LIVE_MODELS.builder,
+      progress: 91,
+      taskId: 'review',
+    });
+    emitReReview(emit, 'Re-reviewing the revised paper');
+    review = await reviewPaper();
+  }
+  emitReview(emit, review, { ...reviewLabels, revised, progress: 96 });
+  const paper = citations.paper;
   emit({
     type: 'complete',
+    usage: usage.totals,
     message: 'Research run complete — paper and sources are ready',
-    detail: `${paper.sections.length} sections · ${discovery.sources.length} sources · ${review.nextStep}`,
+    detail: `${paper.sections.length} sections · ${discovery.sources.length} sources${revised ? ' · revised once after review' : ''} · ${review.nextStep}`,
     progress: 100,
     taskId: 'ship',
   });
@@ -777,15 +939,17 @@ async function runResearchCollaboration({
 export function runLiveCollaboration({
   prompt,
   workType,
+  refine,
   signal,
   emit,
 }: {
   prompt: string;
   workType: WorkType;
+  refine?: Refinement;
   signal: AbortSignal;
   emit: EmitLiveEvent;
 }) {
-  if (workType === 'design') return runDesignCollaboration({ prompt, signal, emit });
-  if (workType === 'research') return runResearchCollaboration({ prompt, signal, emit });
-  return runCodingCollaboration({ prompt, signal, emit });
+  if (workType === 'design') return runDesignCollaboration({ prompt, refine, signal, emit });
+  if (workType === 'research') return runResearchCollaboration({ prompt, refine, signal, emit });
+  return runCodingCollaboration({ prompt, refine, signal, emit });
 }

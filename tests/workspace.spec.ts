@@ -42,9 +42,9 @@ test('retry keeps partial files even when retry fails', async ({ page }) => {
   await stream(page, [file, { type: 'error', message: 'Interrupted' }]);
   await start(page);
   await expect(page.locator('.code-scroll')).toContainText('Hello');
-  await expect(page.locator('.live-pill')).toHaveText('Paused');
+  await expect(page.locator('.live-pill')).toHaveText('Interrupted');
   await stream(page, [{ type: 'error', message: 'Retry failed' }]);
-  await page.getByTitle('Start run', { exact: true }).click();
+  await page.getByRole('button', { name: 'Retry run', exact: true }).click();
   await expect(page.locator('.activity-feed')).toContainText('Retry failed');
   await expect(page.locator('.code-scroll')).toContainText('Hello');
 });
@@ -62,7 +62,7 @@ test('new mission replaces old artifacts only after new output', async ({ page }
 
 test('early EOF unlocks workspace and explains failure', async ({ page }) => {
   await stream(page, [{ type: 'run', message: 'Started', progress: 5 }]); await start(page);
-  await expect(page.locator('.live-pill')).toHaveText('Paused');
+  await expect(page.locator('.live-pill')).toHaveText('Interrupted');
   await expect(page.locator('.activity-feed')).toContainText('stream ended before');
   await expect(page.getByRole('button', { name: 'Design', exact: true })).toBeEnabled();
 });
@@ -91,7 +91,7 @@ test('file can be updated to empty content', async ({ page }) => {
 
 test('paper abstract and conclusion links scroll', async ({ page }) => {
   await page.getByRole('button', { name: 'Research', exact: true }).click();
-  await stream(page, [{ type: 'paper', paper: {
+  await stream(page, [{ type: 'paper', message: 'Paper drafted', paper: {
     title: 'Navigation', subtitle: 'Test', abstract: 'Abstract', conclusion: 'Conclusion',
     sections: Array.from({ length: 5 }, (_, i) => ({ id: `s${i}`, heading: `Section ${i}`, paragraphs: Array(5).fill('Long paragraph. '.repeat(60)), sourceIds: [] })),
   } }, complete]); await start(page, 'Research');
@@ -156,4 +156,144 @@ test('expired OIDC cannot enable harnesses; explicit sandbox credentials can', (
   expect(getExecutionCapabilities(explicit).codingHarnesses).toBe(true);
   expect(getSandboxOptions(explicit)).toEqual({ token: 'test-token', teamId: 'team', projectId: 'project' });
   expect(JSON.stringify(getConnectionSetup(explicit))).not.toContain('test-token');
+});
+
+test('a revision event replaces draft artifacts instead of merging', async ({ page }) => {
+  await stream(page, [
+    { ...file, workType: 'coding' },
+    { type: 'activity', workType: 'coding', message: 'Replacing the draft', resetArtifacts: true },
+    { ...file, workType: 'coding', file: 'revised.txt', content: 'Revised' },
+    complete,
+  ]);
+  await start(page);
+  await expect(page.locator('.code-scroll')).toContainText('Revised');
+  await expect(page.locator('.file-tree')).not.toContainText('hello.txt');
+});
+
+test('stopping a run says it stopped and offers a retry', async ({ page }) => {
+  await page.unroute('**/api/runs');
+  await page.route('**/api/runs', () => { /* never answers: the run stays in flight */ });
+  await start(page);
+  await page.getByRole('button', { name: 'Stop run', exact: true }).click();
+  await expect(page.locator('.live-pill')).toHaveText('Stopped');
+  await expect(page.getByRole('button', { name: 'Retry run', exact: true })).toBeEnabled();
+});
+
+test('generated files and the mission survive a page reload', async ({ page }) => {
+  await stream(page, [file, complete]);
+  await start(page, 'Persist me');
+  await expect(page.locator('.code-scroll')).toContainText('Hello');
+  await page.waitForTimeout(600);
+  await page.reload();
+  await expect(page.locator('.code-scroll')).toContainText('Hello');
+  await expect(page.locator('.mission-card h1')).toHaveText('Persist me');
+});
+
+test('agent room can be hidden and a workspace cleared', async ({ page }) => {
+  await page.getByRole('button', { name: 'Hide agent room' }).click();
+  await expect(page.locator('.agent-panel')).toBeHidden();
+  await page.getByRole('button', { name: 'Show agent room' }).click();
+  await expect(page.locator('.agent-panel')).toBeVisible();
+  await stream(page, [file, complete]); await start(page);
+  await expect(page.locator('.code-scroll')).toContainText('Hello');
+  await page.getByRole('button', { name: 'Clear workspace' }).click();
+  await expect(page.locator('.file-tree')).not.toContainText('hello.txt');
+  await expect(page.locator('.live-pill')).toHaveText('Idle');
+});
+
+test('generated code downloads as a zip archive', async ({ page }) => {
+  await stream(page, [file, { ...file, file: 'src/app.ts', content: 'export {}' }, complete]);
+  await start(page, 'Zip project');
+  await expect(page.locator('.file-tree')).toContainText('app.ts');
+  const downloaded = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download code' }).click();
+  const download = await downloaded;
+  expect(download.suggestedFilename()).toBe('zip-project.zip');
+  const chunks: Buffer[] = [];
+  for await (const chunk of await download.createReadStream()) chunks.push(chunk as Buffer);
+  const archive = Buffer.concat(chunks);
+  expect(archive.subarray(0, 4).toString('hex')).toBe('504b0304');
+  expect(archive.toString('latin1')).toContain('zip-project/src/app.ts');
+});
+
+test('a follow-up sends the current result so the team can revise it', async ({ page }) => {
+  await stream(page, [file, complete]); await start(page, 'First version');
+  await expect(page.locator('.code-scroll')).toContainText('Hello');
+  let body: { refine?: { previousMission: string; files?: { path: string; content: string }[] } } = {};
+  await page.unroute('**/api/runs');
+  await page.route('**/api/runs', (route) => {
+    body = route.request().postDataJSON();
+    return route.fulfill({ contentType: 'text/event-stream', body: `data: ${JSON.stringify({ id: 'r', at: new Date().toISOString(), ...complete })}\n\n` });
+  });
+  const buildOn = page.getByRole('button', { name: 'Build on result' });
+  await expect(buildOn).toHaveAttribute('aria-pressed', 'false');
+  await buildOn.click();
+  await expect(buildOn).toHaveAttribute('aria-pressed', 'true');
+  await start(page, 'Make it blue');
+  await expect(page.locator('.live-pill')).toHaveText('Run complete');
+  expect(body.refine?.previousMission).toBe('First version');
+  expect(body.refine?.files).toEqual([{ path: 'hello.txt', content: 'Hello' }]);
+});
+
+test('follow-up context is validated', async ({ request }) => {
+  const response = await request.post('/api/runs', { data: { prompt: 'x', mode: 'live', workType: 'coding', refine: { previousMission: 'y', files: [{ path: '', content: 'z' }] } } });
+  expect(response.status()).toBe(400);
+});
+
+test('code is highlighted and a changed file can be compared with its previous version', async ({ page }) => {
+  await stream(page, [
+    { ...file, file: 'app.ts', content: 'const greeting = "hi";\nexport { greeting };' },
+    { ...file, file: 'app.ts', content: 'const greeting = "hello";\nexport { greeting };' },
+    complete,
+  ]);
+  await start(page);
+  await expect(page.locator('.code-scroll .hljs-keyword').first()).toHaveText('const');
+  await page.getByRole('button', { name: 'Show changes' }).click();
+  await expect(page.locator('.diff-removed')).toContainText('"hi"');
+  await expect(page.locator('.diff-added')).toContainText('"hello"');
+});
+
+test('token usage from the run is shown when it completes', async ({ page }) => {
+  await stream(page, [{ ...complete, usage: { inputTokens: 12_400, outputTokens: 3_100, calls: 4 } }]);
+  await start(page);
+  await expect(page.locator('.activity-footer')).toHaveText('12.4k in · 3.1k out · 4 model calls');
+});
+
+test('canvas elements can be edited, resized, deleted and restored with undo', async ({ page }) => {
+  await page.getByRole('button', { name: 'Design', exact: true }).click();
+  await page.getByRole('button', { name: 'Note', exact: true }).click();
+  const note = page.locator('.canvas-sticky');
+  await note.dblclick();
+  await page.getByRole('textbox', { name: 'Element text' }).fill('Edited note');
+  await page.keyboard.press('Enter');
+  await expect(note).toContainText('Edited note');
+
+  const before = (await note.boundingBox())!;
+  const handle = (await page.locator('.canvas-resize-handle').boundingBox())!;
+  await page.mouse.move(handle.x + 4, handle.y + 4); await page.mouse.down();
+  await page.mouse.move(handle.x + 80, handle.y + 60, { steps: 6 }); await page.mouse.up();
+  expect((await note.boundingBox())!.width).toBeGreaterThan(before.width + 40);
+
+  await note.focus();
+  await page.keyboard.press('Delete');
+  await expect(note).toHaveCount(0);
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(page.locator('.canvas-sticky')).toContainText('Edited note');
+
+  const downloaded = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export PNG' }).click();
+  expect((await downloaded).suggestedFilename()).toBe('design-board.png');
+});
+
+test('malformed events are ignored instead of corrupting the workspace', async ({ page }) => {
+  await stream(page, [
+    { type: 'file', message: 'Missing path', content: 'Should not appear' } as Partial<RunEvent>,
+    { type: 'canvas', message: 'Bad element', element: { id: 'x' } } as unknown as Partial<RunEvent>,
+    file,
+    complete,
+  ]);
+  await start(page);
+  await expect(page.locator('.code-scroll')).toContainText('Hello');
+  await expect(page.locator('.code-scroll')).not.toContainText('Should not appear');
+  await expect(page.locator('.file-tree .file-row')).toHaveCount(1);
 });

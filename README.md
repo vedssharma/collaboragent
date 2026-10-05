@@ -6,12 +6,15 @@ Collaboragent is a working product prototype for a shared AI-agent workspace. A 
 
 - A responsive collaboration room with agent ownership, status, progress, file activity, and Google-Docs-style cursors.
 - Dedicated coding, design, and research workspaces with mode-specific agent roles and workflows.
-- An editable spatial canvas for agent-created shapes, assets, notes, labels, and diagrams.
-- A web-grounded research studio that streams verified sources into a structured, citation-linked paper.
+- An editable spatial canvas for agent-created shapes, assets, notes, labels, and diagrams, with text editing, resizing, deletion, undo/redo and keyboard moves.
+- A web-grounded research studio that keeps only sources the web search actually returned and removes citations to anything else.
 - A streamed server-sent event protocol for run, agent, task, file, review, and completion events.
-- Interactive mission submission, pausing, restarting, agent inspection, and file selection.
-- Real AI SDK v7 execution across Claude, Gemini, and OpenAI/Codex models.
+- Interactive mission submission, stopping, retrying (output merges into existing artifacts), agent inspection, and file selection.
+- Real AI SDK v7 execution across Claude, Gemini, and OpenAI/Codex models, with one revision round whenever the independent reviewer requests changes.
+- A highlighted code view with a diff against each file's previous version.
+- Follow-up requests: turn on **Build on result** to send the current files, board or paper with the next instruction so the team revises it instead of starting over. Coding-agent runs restore the previous files into the sandbox first.
 - Claude Code and Codex harness adapters, plus a provider readiness endpoint.
+  Harness runs collect up to 60 files (48 KB each, 400 KB total) and report anything skipped or truncated.
 
 ## Run locally
 
@@ -27,8 +30,16 @@ Quality checks:
 ```bash
 npm run typecheck
 npm run lint
+npm run test:unit
 npm run build
 npm run smoke:harness
+```
+
+Unit tests cover the libraries and run all three pipelines against mocked
+models (no provider spend):
+
+```bash
+npm run test:unit
 ```
 
 Browser regression tests (mocked model streams; no provider spend):
@@ -38,9 +49,14 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
+To use an already-installed Chromium instead of downloading one, set
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE` to its path.
+
 The suite covers mobile submission, retry preservation, interrupted streams,
 keyboard submission, review counts, empty files, research navigation, canvas
-panning/export, request validation, and provider setup. Boards export as SVG.
+panning/editing/export, code download, follow-ups, event validation, request
+validation, provider setup, and axe accessibility checks for each workspace.
+Boards export as SVG or PNG and generated code downloads as a zip archive.
 
 The harness smoke test provisions a real Vercel Sandbox and verifies the full
 Claude Code → Codex → Claude handoff on one shared file, so it incurs provider
@@ -58,6 +74,23 @@ and restart. Alternatively, supply all of `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and
 `VERCEL_PROJECT_ID` on the server for Sandbox access. AI Gateway is still required
 for the Gemini research stage. Direct API keys configure the corresponding
 coding harness, not the complete multi-provider model pipeline.
+
+### Access control and limits
+
+Every run spends provider credit, and coding-agent runs provision billable
+sandboxes, so `/api/runs` is gated:
+
+- Set `COLLABORAGENT_ACCESS_TOKEN` to require a shared access code. Users enter
+  it under **Settings → Provider connections**; it is stored only in their
+  browser and sent as the `x-collaboragent-access` header.
+- In production, runs are refused until a token is configured. Set
+  `COLLABORAGENT_ALLOW_ANONYMOUS=true` only if the deployment is protected some
+  other way (for example Vercel Deployment Protection).
+- Each client gets one concurrent run, 20 runs per hour and 4 coding-agent
+  sandboxes per hour; the server allows 4 concurrent runs in total. Override
+  with `COLLABORAGENT_RUNS_PER_HOUR`, `COLLABORAGENT_HARNESS_RUNS_PER_HOUR` and
+  `COLLABORAGENT_MAX_CONCURRENT_RUNS`. Limits are kept in memory per server
+  instance.
 
 ### Subscription sign-in limitations
 
@@ -80,9 +113,18 @@ server-side credential storage, revocation, and supported provider integrations.
 - `harness`: Claude Code and Codex collaborate sequentially inside one isolated Vercel Sandbox filesystem. Claude creates the architecture and first implementation, Codex inspects and completes it, and Claude performs the final review before Collaboragent collects the files and destroys the sandbox. This mode appears as **Coding agents** when `VERCEL_OIDC_TOKEN` is configured.
 - `live`: Claude and Gemini generate architecture and UX direction in parallel, Codex produces complete project files, and an independent OpenAI reviewer scores the artifacts. Every stage is projected into the `RunEvent` protocol and the generated files appear in the shared editor.
 
+Each role's model is configurable with `COLLABORAGENT_MODEL_ARCHITECT`,
+`COLLABORAGENT_MODEL_RESEARCHER`, `COLLABORAGENT_MODEL_BUILDER` and
+`COLLABORAGENT_MODEL_REVIEWER` (AI Gateway ids such as `anthropic/claude-haiku-4.5`).
+Live runs report total input and output tokens in the activity panel when they finish.
+
 Design and research use live mode. Design streams a typed spatial board into the canvas. Research uses the AI Gateway web-search tool, preserves returned source URLs, writes a multi-section paper from that source packet, and sends it through an independent research review.
 
-Generated artifacts remain in the browser session; neither real execution mode writes to the host filesystem.
+Generated artifacts are saved in the browser's local storage so a refresh keeps
+the last files, board and paper for each workspace; neither real execution mode
+writes to the host filesystem. Runs themselves are tied to the streaming
+request: closing the tab stops the run. Server-side run storage with
+reconnectable event streams is the next step for durable, shareable runs.
 
 Claude Code and Codex use the experimental AI SDK harness interface. Harness sessions require `VERCEL_OIDC_TOKEN` and provision billable isolated sandboxes. The request-scoped implementation always destroys its sandbox; persistent projects should store each opaque resume state and sandbox identity in durable storage.
 

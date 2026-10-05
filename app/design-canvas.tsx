@@ -7,21 +7,30 @@ import {
   Minus,
   MousePointer2,
   Plus,
+  Redo2,
   Shapes,
   Sparkles,
   StickyNote,
+  Trash2,
   Type,
+  Undo2,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import type { AgentView, DesignElement, DesignElementKind } from '@/lib/types';
 
 type DragState = {
   id: string;
+  mode: 'move' | 'resize';
   startX: number;
   startY: number;
   elementX: number;
   elementY: number;
+  width: number;
+  height: number;
+  moved: boolean;
 };
+
+const MAX_HISTORY = 50;
 
 const OWNER_COLORS: Record<DesignElement['owner'], string> = {
   claude: '#d36b4c',
@@ -52,6 +61,77 @@ export function DesignCanvas({
   const scrollRef = useRef<HTMLDivElement>(null);
   const panRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const dragRef = useRef<DragState | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+  // Local undo history of user edits. Snapshots are whole element lists, so an
+  // undo also rolls back anything agents placed after that edit.
+  const [past, setPast] = useState<DesignElement[][]>([]);
+  const [future, setFuture] = useState<DesignElement[][]>([]);
+  const selected = elements.find((element) => element.id === selectedId) ?? null;
+
+  const commit = (next: DesignElement[]) => {
+    setPast((history) => [...history, elements].slice(-MAX_HISTORY));
+    setFuture([]);
+    onChange(next);
+  };
+  const undo = () => {
+    const previous = past.at(-1);
+    if (!previous) return;
+    setPast((history) => history.slice(0, -1));
+    setFuture((redo) => [elements, ...redo].slice(0, MAX_HISTORY));
+    onChange(previous);
+  };
+  const redo = () => {
+    const next = future[0];
+    if (!next) return;
+    setFuture((redoStack) => redoStack.slice(1));
+    setPast((history) => [...history, elements].slice(-MAX_HISTORY));
+    onChange(next);
+  };
+  const removeSelected = () => {
+    if (!selectedId) return;
+    commit(elements.filter((element) => element.id !== selectedId));
+    setSelectedId(null);
+  };
+  const update = (id: string, patch: Partial<DesignElement>) =>
+    elements.map((element) => element.id === id ? { ...element, ...patch } : element);
+
+  const startEditing = (element: DesignElement) => {
+    if (element.kind === 'connector') return;
+    setSelectedId(element.id);
+    setEditingId(element.id);
+    setEditText(element.text);
+  };
+  const finishEditing = (save: boolean) => {
+    if (editingId && save) {
+      const current = elements.find((element) => element.id === editingId);
+      if (current && current.text !== editText) commit(update(editingId, { text: editText.slice(0, 180) }));
+    }
+    setEditingId(null);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (editingId) return;
+    const modifier = event.metaKey || event.ctrlKey;
+    if (modifier && event.key.toLowerCase() === 'z') {
+      event.preventDefault();
+      if (event.shiftKey) redo(); else undo();
+      return;
+    }
+    if (modifier && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); return; }
+    if (!selected) return;
+    if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeSelected(); return; }
+    if (event.key === 'Enter') { event.preventDefault(); startEditing(selected); return; }
+    if (event.key === 'Escape') { setSelectedId(null); return; }
+    const step = event.shiftKey ? 5 : 1;
+    const delta = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key];
+    if (!delta) return;
+    event.preventDefault();
+    commit(update(selected.id, {
+      x: clamp(selected.x + delta[0], 0, 100 - selected.width),
+      y: clamp(selected.y + delta[1], 0, 100 - selected.height),
+    }));
+  };
 
   const addElement = (kind: DesignElementKind) => {
     const id = `local-${kind}-${Date.now()}`;
@@ -77,19 +157,24 @@ export function DesignCanvas({
       owner: 'codex',
       ...defaults[kind],
     };
-    onChange([...elements, next]);
+    commit([...elements, next]);
     setSelectedId(id);
   };
 
-  const beginDrag = (event: React.PointerEvent, element: DesignElement) => {
-    if (tool !== 'select') return;
+  const beginDrag = (event: React.PointerEvent, element: DesignElement, mode: DragState['mode'] = 'move') => {
+    if (tool !== 'select' || editingId === element.id) return;
+    event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = {
       id: element.id,
+      mode,
       startX: event.clientX,
       startY: event.clientY,
       elementX: element.x,
       elementY: element.y,
+      width: element.width,
+      height: element.height,
+      moved: false,
     };
     setSelectedId(element.id);
   };
@@ -99,18 +184,31 @@ export function DesignCanvas({
     const board = boardRef.current;
     if (!drag || !board) return;
     const bounds = board.getBoundingClientRect();
-    const nextX = drag.elementX + ((event.clientX - drag.startX) / bounds.width) * 100;
-    const nextY = drag.elementY + ((event.clientY - drag.startY) / bounds.height) * 100;
+    const dx = ((event.clientX - drag.startX) / bounds.width) * 100;
+    const dy = ((event.clientY - drag.startY) / bounds.height) * 100;
+    if (!drag.moved) {
+      if (Math.abs(dx) + Math.abs(dy) < 0.2) return;
+      // Record one undo step per gesture, not per pointer move.
+      drag.moved = true;
+      setPast((history) => [...history, elements].slice(-MAX_HISTORY));
+      setFuture([]);
+    }
     onChange(
-      elements.map((element) =>
-        element.id === drag.id
-          ? {
-              ...element,
-              x: clamp(nextX, 0, 100 - element.width),
-              y: clamp(nextY, 0, 100 - element.height),
-            }
-          : element,
-      ),
+      elements.map((element) => {
+        if (element.id !== drag.id) return element;
+        if (drag.mode === 'resize') {
+          return {
+            ...element,
+            width: clamp(drag.width + dx, 2, 100 - element.x),
+            height: clamp(drag.height + dy, 1, 100 - element.y),
+          };
+        }
+        return {
+          ...element,
+          x: clamp(drag.elementX + dx, 0, 100 - element.width),
+          y: clamp(drag.elementY + dy, 0, 100 - element.height),
+        };
+      }),
     );
   };
 
@@ -136,7 +234,13 @@ export function DesignCanvas({
           <button onClick={() => addElement('text')}><Type size={14} /><span>Text</span></button>
           <button onClick={() => addElement('sticky')}><StickyNote size={14} /><span>Note</span></button>
         </div>
-        <div className="canvas-presence" aria-label="Agents on the canvas">
+        <span className="design-toolbar-divider" />
+        <div className="design-toolbar-group" aria-label="Edit canvas">
+          <button onClick={undo} disabled={past.length === 0} aria-label="Undo" title="Undo (Ctrl+Z)"><Undo2 size={14} /></button>
+          <button onClick={redo} disabled={future.length === 0} aria-label="Redo" title="Redo (Ctrl+Shift+Z)"><Redo2 size={14} /></button>
+          <button onClick={removeSelected} disabled={!selected} aria-label="Delete selected element" title="Delete (Del)"><Trash2 size={14} /></button>
+        </div>
+        <div className="canvas-presence" role="group" aria-label="Agents on the canvas">
           {agents
             .filter((agent) => agent.status !== 'queued')
             .slice(0, 3)
@@ -171,6 +275,9 @@ export function DesignCanvas({
         <div
           ref={boardRef}
           className="design-board"
+          role="application"
+          aria-label="Design board. Tab to an element; arrow keys move it, Enter edits its text, Delete removes it."
+          onKeyDown={handleKeyDown}
           style={{ width: `${zoom * 100}%`, minWidth: `${760 * zoom}px` }}
           onPointerMove={moveElement}
           onPointerUp={endDrag}
@@ -197,6 +304,9 @@ export function DesignCanvas({
                   viewBox="0 0 100 100"
                   preserveAspectRatio="none"
                   onPointerDown={(event) => beginDrag(event, element)}
+                  tabIndex={0}
+                  role="img"
+                  onFocus={() => setSelectedId(element.id)}
                   aria-label={element.text || 'Diagram connector'}
                 >
                   <defs>
@@ -225,11 +335,36 @@ export function DesignCanvas({
                   '--owner-color': OWNER_COLORS[element.owner],
                 } as React.CSSProperties}
                 onPointerDown={(event) => beginDrag(event, element)}
-                title={`Created by ${agents.find((agent) => agent.id === element.owner)?.name ?? element.owner}`}
+                onDoubleClick={() => startEditing(element)}
+                tabIndex={0}
+                role="group"
+                aria-label={`${element.kind}: ${element.text || 'empty'}`}
+                onFocus={() => setSelectedId(element.id)}
+                title={`Created by ${agents.find((agent) => agent.id === element.owner)?.name ?? element.owner} · double-click to edit`}
               >
                 {element.kind === 'icon' && <Sparkles size={Math.max(14, Math.min(28, element.width))} />}
-                <span>{element.text}</span>
+                {editingId === element.id ? (
+                  <textarea
+                    className="canvas-text-editor"
+                    aria-label="Element text"
+                    autoFocus
+                    value={editText}
+                    maxLength={180}
+                    style={{ color: element.textColor }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onChange={(event) => setEditText(event.target.value)}
+                    onBlur={() => finishEditing(true)}
+                    onKeyDown={(event) => {
+                      event.stopPropagation();
+                      if (event.key === 'Escape') finishEditing(false);
+                      if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); finishEditing(true); }
+                    }}
+                  />
+                ) : <span>{element.text}</span>}
                 <i className="design-owner-dot" />
+                {selectedId === element.id && editingId !== element.id && (
+                  <i className="canvas-resize-handle" aria-hidden="true" onPointerDown={(event) => beginDrag(event, element, 'resize')} />
+                )}
               </div>
             );
           })}
