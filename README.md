@@ -11,6 +11,7 @@ Collaboragent is a working product prototype for a shared AI-agent workspace. A 
 - A streamed server-sent event protocol for run, agent, task, file, review, and completion events.
 - Interactive mission submission, stopping, retrying (output merges into existing artifacts), agent inspection, and file selection.
 - Real AI SDK v7 execution across Claude, Gemini, and OpenAI/Codex models.
+- Follow-up requests: turn on **Build on result** to send the current files, board or paper with the next instruction so the team revises it instead of starting over. Coding-agent runs restore the previous files into the sandbox first.
 - Claude Code and Codex harness adapters, plus a provider readiness endpoint.
   Harness runs collect up to 60 files (48 KB each, 400 KB total) and report anything skipped or truncated.
 

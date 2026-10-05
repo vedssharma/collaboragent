@@ -4,6 +4,7 @@ import { runLiveCollaboration } from '@/lib/live-collaboration';
 import { runHarnessCollaboration } from '@/lib/harness-collaboration';
 import { getExecutionCapabilities } from '@/lib/provider-config';
 import { checkAccess, runLimiter } from '@/lib/access-control';
+import { refinementSchema } from '@/lib/refinement';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -13,6 +14,7 @@ const runRequest = z.object({
   prompt: z.string().trim().min(1).max(4_000),
   mode: z.enum(['live', 'harness']),
   workType: z.enum(['coding', 'design', 'research']).default('coding'),
+  refine: refinementSchema.optional(),
 }).strict();
 
 export async function POST(request: Request) {
@@ -26,7 +28,7 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  const { prompt, mode, workType } = parsed.data;
+  const { prompt, mode, workType, refine } = parsed.data;
   if (mode === 'harness' && workType !== 'coding') {
     return Response.json(
       { error: 'Coding harnesses are only available in the coding workspace.' },
@@ -77,9 +79,9 @@ export async function POST(request: Request) {
 
       try {
         if (mode === 'harness') {
-          await runHarnessCollaboration({ prompt, signal: request.signal, emit: send });
+          await runHarnessCollaboration({ prompt, refine, signal: request.signal, emit: send });
         } else if (mode === 'live') {
-          await runLiveCollaboration({ prompt, workType, signal: request.signal, emit: send });
+          await runLiveCollaboration({ prompt, workType, refine, signal: request.signal, emit: send });
         }
       } catch (error) {
         if (!cancelled && (error as Error).name !== 'AbortError') {

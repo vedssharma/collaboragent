@@ -215,3 +215,27 @@ test('generated code downloads as a zip archive', async ({ page }) => {
   expect(archive.subarray(0, 4).toString('hex')).toBe('504b0304');
   expect(archive.toString('latin1')).toContain('zip-project/src/app.ts');
 });
+
+test('a follow-up sends the current result so the team can revise it', async ({ page }) => {
+  await stream(page, [file, complete]); await start(page, 'First version');
+  await expect(page.locator('.code-scroll')).toContainText('Hello');
+  let body: { refine?: { previousMission: string; files?: { path: string; content: string }[] } } = {};
+  await page.unroute('**/api/runs');
+  await page.route('**/api/runs', (route) => {
+    body = route.request().postDataJSON();
+    return route.fulfill({ contentType: 'text/event-stream', body: `data: ${JSON.stringify({ id: 'r', at: new Date().toISOString(), ...complete })}\n\n` });
+  });
+  const buildOn = page.getByRole('button', { name: 'Build on result' });
+  await expect(buildOn).toHaveAttribute('aria-pressed', 'false');
+  await buildOn.click();
+  await expect(buildOn).toHaveAttribute('aria-pressed', 'true');
+  await start(page, 'Make it blue');
+  await expect(page.locator('.live-pill')).toHaveText('Run complete');
+  expect(body.refine?.previousMission).toBe('First version');
+  expect(body.refine?.files).toEqual([{ path: 'hello.txt', content: 'Hello' }]);
+});
+
+test('follow-up context is validated', async ({ request }) => {
+  const response = await request.post('/api/runs', { data: { prompt: 'x', mode: 'live', workType: 'coding', refine: { previousMission: 'y', files: [{ path: '', content: 'z' }] } } });
+  expect(response.status()).toBe(400);
+});

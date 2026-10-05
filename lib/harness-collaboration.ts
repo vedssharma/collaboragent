@@ -7,6 +7,8 @@ import { getSandboxOptions } from './provider-config';
 import { gateway, Output, ToolLoopAgent } from 'ai';
 import { z } from 'zod';
 import type { AgentId, RunEvent } from '@/lib/types';
+import type { Refinement } from '@/lib/refinement';
+import { safeArchivePath } from '@/lib/zip';
 
 const CLAUDE_PORT = 4000;
 const CODEX_PORT = 4001;
@@ -204,10 +206,12 @@ function languageForPath(path: string) {
 
 export async function runHarnessCollaboration({
   prompt,
+  refine,
   signal,
   emit,
 }: {
   prompt: string;
+  refine?: Refinement;
   signal: AbortSignal;
   emit: EmitHarnessEvent;
 }) {
@@ -310,8 +314,26 @@ export async function runHarnessCollaboration({
 
   try {
     sandboxSession = await sandboxProvider.createSession({ abortSignal: signal });
+    const seededFiles = refine?.files ?? [];
+    if (seededFiles.length > 0) {
+      // Follow-up runs continue the previous project instead of starting empty.
+      const root = `${sandboxSession.defaultWorkingDirectory}/${WORK_DIR}`;
+      for (const file of seededFiles) {
+        await sandboxSession.writeTextFile({ path: `${root}/${safeArchivePath(file.path)}`, content: file.content, abortSignal: signal });
+      }
+      emit({
+        type: 'activity',
+        status: 'working',
+        message: `Restored ${seededFiles.length} files from the previous run`,
+        detail: 'The agents will revise the existing project for this follow-up.',
+        progress: 6,
+      });
+    }
+    const followUp = seededFiles.length > 0
+      ? `\n\nThis is a follow-up to an earlier mission:\n${refine?.previousMission ?? ''}\nThe workspace already contains that project. Treat the mission above as a change request: inspect the existing files, keep what works, and revise rather than starting over.`
+      : '';
     const researchResult = await researchAgent.generate({
-      prompt: `Mission:\n${prompt}\n\nGive the coding agents a focused UX direction.`,
+      prompt: `Mission:\n${prompt}${followUp}\n\nGive the coding agents a focused UX direction.`,
       abortSignal: signal,
       timeout: 120_000,
     });
@@ -339,7 +361,7 @@ export async function runHarnessCollaboration({
       agentId: 'claude',
       progressStart: 18,
       progressEnd: 42,
-      prompt: `Mission:\n${prompt}\n\nUX direction:\n${research.direction}\nPriorities:\n- ${research.priorities.join('\n- ')}\n\nPlan and create the initial runnable implementation in this workspace. Write a short PLAN.md for Codex, then build the strongest focused version you can. Keep the project compact and do not stop at a prose answer: use your file and shell tools.`,
+      prompt: `Mission:\n${prompt}${followUp}\n\nUX direction:\n${research.direction}\nPriorities:\n- ${research.priorities.join('\n- ')}\n\nPlan and create the initial runnable implementation in this workspace. Write a short PLAN.md for Codex, then build the strongest focused version you can. Keep the project compact and do not stop at a prose answer: use your file and shell tools.`,
     });
     emit({
       type: 'activity',
@@ -380,7 +402,7 @@ export async function runHarnessCollaboration({
       progressEnd: 76,
       signal,
       emit,
-      prompt: `Mission:\n${prompt}\n\nInspect every existing file, including PLAN.md. Take ownership of the implementation: complete missing behavior, improve the UX, fix issues, and run useful checks. Work directly on the files. Keep the result compact and runnable; do not merely describe what should be done.`,
+      prompt: `Mission:\n${prompt}${followUp}\n\nInspect every existing file, including PLAN.md. Take ownership of the implementation: complete missing behavior, improve the UX, fix issues, and run useful checks. Work directly on the files. Keep the result compact and runnable; do not merely describe what should be done.`,
     });
     emit({
       type: 'activity',

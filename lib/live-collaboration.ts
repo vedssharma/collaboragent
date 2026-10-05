@@ -7,6 +7,7 @@ import type {
   RunEvent,
   WorkType,
 } from '@/lib/types';
+import { refinementContext, type Refinement } from '@/lib/refinement';
 import { collectSearchUrls, reconcileCitations, verifySources } from '@/lib/research-verification';
 
 export const LIVE_MODELS = {
@@ -371,14 +372,17 @@ function emitReReview(emit: EmitLiveEvent, message: string) {
 
 async function runCodingCollaboration({
   prompt,
+  refine,
   signal,
   emit,
 }: {
   prompt: string;
+  refine?: Refinement;
   signal: AbortSignal;
   emit: EmitLiveEvent;
 }) {
   ensureNotAborted(signal);
+  const existingWork = refinementContext(refine);
   emit({
     type: 'run',
     message: 'Authenticated multi-provider run started',
@@ -406,7 +410,7 @@ async function runCodingCollaboration({
 
   const [planResult, researchResult] = await Promise.all([
     architect.generate({
-      prompt: `Mission:\n${prompt}\n\nCreate the implementation plan for this product.`,
+      prompt: `Mission:\n${prompt}\n\nCreate the implementation plan for this product.${existingWork}`,
       abortSignal: signal,
       timeout: 120_000,
     }),
@@ -451,7 +455,7 @@ async function runCodingCollaboration({
   });
 
   const buildResult = await builder.generate({
-    prompt: `Mission:\n${prompt}\n\nArchitecture plan:\n${JSON.stringify(plan, null, 2)}\n\nUX research:\n${JSON.stringify(research, null, 2)}\n\nBuild a coherent implementation that satisfies the plan.`,
+    prompt: `Mission:\n${prompt}\n\nArchitecture plan:\n${JSON.stringify(plan, null, 2)}\n\nUX research:\n${JSON.stringify(research, null, 2)}\n\nBuild a coherent implementation that satisfies the plan.${existingWork}`,
     abortSignal: signal,
     timeout: 180_000,
   });
@@ -543,14 +547,17 @@ async function runCodingCollaboration({
 
 async function runDesignCollaboration({
   prompt,
+  refine,
   signal,
   emit,
 }: {
   prompt: string;
+  refine?: Refinement;
   signal: AbortSignal;
   emit: EmitLiveEvent;
 }) {
   ensureNotAborted(signal);
+  const existingWork = refinementContext(refine);
   emit({
     type: 'run',
     message: 'Collaborative design run started',
@@ -578,7 +585,7 @@ async function runDesignCollaboration({
 
   const [directionResult, researchResult] = await Promise.all([
     designDirector.generate({
-      prompt: `Design mission:\n${prompt}\n\nCreate a focused art direction for this canvas.`,
+      prompt: `Design mission:\n${prompt}\n\nCreate a focused art direction for this canvas.${existingWork}`,
       abortSignal: signal,
       timeout: 120_000,
     }),
@@ -623,7 +630,7 @@ async function runDesignCollaboration({
   });
 
   const boardResult = await designComposer.generate({
-    prompt: `Design mission:\n${prompt}\n\nCreative direction:\n${JSON.stringify(direction, null, 2)}\n\nVisual research:\n${JSON.stringify(research, null, 2)}\n\nCompose the finished collaborative board.`,
+    prompt: `Design mission:\n${prompt}\n\nCreative direction:\n${JSON.stringify(direction, null, 2)}\n\nVisual research:\n${JSON.stringify(research, null, 2)}\n\nCompose the finished collaborative board.${existingWork}`,
     abortSignal: signal,
     timeout: 180_000,
   });
@@ -713,14 +720,17 @@ async function runDesignCollaboration({
 
 async function runResearchCollaboration({
   prompt,
+  refine,
   signal,
   emit,
 }: {
   prompt: string;
+  refine?: Refinement;
   signal: AbortSignal;
   emit: EmitLiveEvent;
 }) {
   ensureNotAborted(signal);
+  const existingWork = refinementContext(refine);
   emit({
     type: 'run',
     message: 'Collaborative research run started',
@@ -748,7 +758,7 @@ async function runResearchCollaboration({
 
   const [outlineResult, discoveryResult] = await Promise.all([
     researchArchitect.generate({
-      prompt: `Research topic:\n${prompt}\n\nDevelop a rigorous paper plan.`,
+      prompt: `Research topic:\n${prompt}\n\nDevelop a rigorous paper plan.${existingWork}`,
       abortSignal: signal,
       timeout: 120_000,
     }),
@@ -824,7 +834,7 @@ async function runResearchCollaboration({
   });
 
   const paperResult = await paperWriter.generate({
-    prompt: `Research topic:\n${prompt}\n\nApproved outline:\n${JSON.stringify(outline, null, 2)}\n\nVerified source packet:\n${JSON.stringify(discovery, null, 2)}\n\nWrite the detailed sourced paper now.`,
+    prompt: `Research topic:\n${prompt}\n\nApproved outline:\n${JSON.stringify(outline, null, 2)}\n\nVerified source packet:\n${JSON.stringify(discovery, null, 2)}\n\nWrite the detailed sourced paper now.${existingWork}`,
     abortSignal: signal,
     timeout: 240_000,
   });
@@ -927,15 +937,17 @@ async function runResearchCollaboration({
 export function runLiveCollaboration({
   prompt,
   workType,
+  refine,
   signal,
   emit,
 }: {
   prompt: string;
   workType: WorkType;
+  refine?: Refinement;
   signal: AbortSignal;
   emit: EmitLiveEvent;
 }) {
-  if (workType === 'design') return runDesignCollaboration({ prompt, signal, emit });
-  if (workType === 'research') return runResearchCollaboration({ prompt, signal, emit });
-  return runCodingCollaboration({ prompt, signal, emit });
+  if (workType === 'design') return runDesignCollaboration({ prompt, refine, signal, emit });
+  if (workType === 'research') return runResearchCollaboration({ prompt, refine, signal, emit });
+  return runCodingCollaboration({ prompt, refine, signal, emit });
 }

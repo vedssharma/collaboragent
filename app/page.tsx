@@ -2,7 +2,7 @@
 
 import {
   Activity, ArrowUp, BookOpen, Check, Copy, Download, ChevronDown, ChevronRight, CircleDot,
-  Clock3, Code2, Command, FileCode2, Files, GitBranch, LayoutGrid, Library,
+  Clock3, Code2, Layers, Command, FileCode2, Files, GitBranch, LayoutGrid, Library,
   Palette, PanelLeftClose, PenTool, RotateCcw, Square,
   Play, Radio, Search, Settings, ShieldCheck, Sparkles, Users,
   Trash2, WandSparkles, Zap, CheckCircle2,
@@ -13,6 +13,7 @@ import { ResearchPaper } from '@/app/research-paper';
 import { downloadDesignBoard } from '@/lib/design-export';
 import { loadWorkspace, saveWorkspace } from '@/lib/workspace-storage';
 import { createZip, downloadBlob, slugify } from '@/lib/zip';
+import type { Refinement } from '@/lib/refinement';
 import { ProviderConnections, type ConnectionSetup } from '@/app/provider-connections';
 import type {
   AgentId, AgentView, DesignElement, ResearchPaper as ResearchPaperType,
@@ -129,6 +130,7 @@ export default function Home() {
   const [accessRequired, setAccessRequired] = useState(false);
   const [agentPanelOpen, setAgentPanelOpen] = useState(true);
   const [copiedFile, setCopiedFile] = useState('');
+  const [buildOnResult, setBuildOnResult] = useState(false);
   const [accessCode, setAccessCode] = useState('');
   const accessCodeRef = useRef('');
   const controllerRef = useRef<AbortController | null>(null);
@@ -173,13 +175,15 @@ export default function Home() {
     if (runEvent.type === 'error') setRunState('failed');
   }, []);
 
-  const startRun = useCallback(async (nextMission: string, nextMode: ExecutionMode, nextWorkType: WorkType) => {
+  const startRun = useCallback(async (nextMission: string, nextMode: ExecutionMode, nextWorkType: WorkType, refine?: Refinement) => {
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
     // A retry merges into partial output. A different mission replaces the old
     // artifacts only when its first artifact arrives, never on a failed start.
-    let replaceArtifacts = nextMission !== artifactMissionsRef.current[nextWorkType];
+    // A follow-up revises the current result: code merges file by file, while
+    // a revised board or paper replaces the previous one when it arrives.
+    let replaceArtifacts = refine ? nextWorkType !== 'coding' : nextMission !== artifactMissionsRef.current[nextWorkType];
     setMissions((current) => ({ ...current, [nextWorkType]: nextMission }));
     setDrafts((current) => ({ ...current, [nextWorkType]: nextMission }));
     setProgress(2); setRunState('running'); setActiveRunMode(nextMode); setComposerOpen(false);
@@ -189,7 +193,7 @@ export default function Home() {
       const response = await fetch('/api/runs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(accessCodeRef.current ? { 'x-collaboragent-access': accessCodeRef.current } : {}) },
-        body: JSON.stringify({ prompt: nextMission, mode: nextMode, workType: nextWorkType }), signal: controller.signal,
+        body: JSON.stringify({ prompt: nextMission, mode: nextMode, workType: nextWorkType, ...(refine ? { refine } : {}) }), signal: controller.signal,
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
@@ -224,8 +228,8 @@ export default function Home() {
                 setResearchSources([]); setResearchPaper(null);
               }
               replaceArtifacts = false;
-              artifactMissionsRef.current[nextWorkType] = nextMission;
             }
+            if (hasArtifact) artifactMissionsRef.current[nextWorkType] = nextMission;
             applyEvent(runEvent);
             if (runEvent.type === 'complete' || runEvent.type === 'error') terminalEvent = true;
           }
@@ -326,8 +330,15 @@ export default function Home() {
   };
   const submitMission = (event: React.FormEvent) => {
     event.preventDefault();
-    if (draft.trim() && executionAvailable && runState !== 'running') void startRun(draft.trim(), selectedExecutionMode, workType);
+    if (!draft.trim() || !executionAvailable || runState === 'running') return;
+    void startRun(draft.trim(), selectedExecutionMode, workType, refineEnabled ? currentRefinement() : undefined);
   };
+  const currentRefinement = (): Refinement => ({
+    previousMission: missions[workType].slice(0, 4000),
+    ...(workType === 'coding' ? { files: changedFiles.slice(0, 60).map((path) => ({ path: path.slice(0, 200), content: (fileContents[path] ?? '').slice(0, 48_000) })) } : {}),
+    ...(workType === 'design' ? { board: { title: designTitle.slice(0, 200), elements: designElements.slice(0, 60) } } : {}),
+    ...(workType === 'research' && researchPaper ? { paper: researchPaper } : {}),
+  });
   const downloadCode = () => {
     const files = changedFiles.map((path) => ({ path, content: fileContents[path] ?? '' }));
     if (files.length === 0) return;
@@ -363,6 +374,8 @@ export default function Home() {
   const cursorAgent = lastCursor ? agents.find((agent) => agent.id === lastCursor.agentId) : undefined;
   const ModeIcon = config.icon;
   const artifactCount = workType === 'coding' ? changedFiles.length : workType === 'design' ? designElements.length : researchSources.length;
+  const canRefine = Boolean(missions[workType]) && artifactCount > 0;
+  const refineEnabled = canRefine && buildOnResult;
   const thirdMetric = workType === 'research' ? researchPaper?.sections.length ?? 0 : checks ? `${checks.passed}/${checks.total}` : '—';
   const summaryLabels = workType === 'coding' ? ['Agents', 'Files', 'Checks'] : workType === 'design' ? ['Agents', 'Assets', 'Checks'] : ['Agents', 'Sources', 'Sections'];
   const taskIcons = [Sparkles, workType === 'design' ? PenTool : workType === 'research' ? Search : Code2, ShieldCheck, CheckCircle2];
@@ -467,6 +480,7 @@ export default function Home() {
               }} placeholder={config.placeholder} />
               <div className="composer-controls">
                 {workType === 'coding' ? <button type="button" className={`mode-chip ${executionMode}`} aria-label="Toggle real agent execution" aria-pressed={executionMode === 'harness'} disabled={!liveAvailable || !harnessAvailable} onClick={() => setExecutionMode((current) => current === 'harness' ? 'live' : 'harness')}>{executionMode === 'harness' ? <Code2 size={11} /> : <Radio size={11} />}{executionMode === 'harness' ? 'Coding agents' : 'Model team'}</button> : <span className={`mode-chip ${workType}`}>{workType === 'design' ? <Palette size={11} /> : <Search size={11} />}{workType === 'design' ? 'Design agents' : 'Research agents'}</span>}
+                {canRefine && <button type="button" className={`refine-chip ${refineEnabled ? 'active' : ''}`} aria-pressed={refineEnabled} onClick={() => setBuildOnResult((current) => !current)} title="Send the current result with this request so the team revises it instead of starting over">{refineEnabled ? <Check size={11} /> : <Layers size={11} />}Build on result</button>}
                 <span className="team-chip"><Users size={12} /> {agents.length} agents</span><button type="submit" className="send-button" aria-label="Start team run" disabled={!draft.trim() || !executionAvailable || runState === 'running'}><ArrowUp size={16} /></button>
               </div></form>{composerOpen && <p><span>Enter</span> to send · Shift+Enter for a new line</p>}</section>
           </section>
