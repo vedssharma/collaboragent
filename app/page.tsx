@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { DesignCanvas } from '@/app/design-canvas';
 import { ResearchPaper } from '@/app/research-paper';
 import { downloadDesignBoard } from '@/lib/design-export';
+import { loadWorkspace, saveWorkspace } from '@/lib/workspace-storage';
 import { ProviderConnections, type ConnectionSetup } from '@/app/provider-connections';
 import type {
   AgentId, AgentView, DesignElement, ResearchPaper as ResearchPaperType,
@@ -271,6 +272,32 @@ export default function Home() {
       if (saved) setAccessCode(saved);
     } catch { /* storage unavailable: the code is requested again on 401 */ }
   }, []);
+  // Restore the last workspace after hydration, then keep it saved so a
+  // refresh does not lose generated files, boards or papers.
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    const saved = loadWorkspace();
+    restoredRef.current = true;
+    if (!saved) return;
+    /* eslint-disable react-hooks/set-state-in-effect -- localStorage is only readable after hydration. */
+    setWorkType(saved.workType); setAgents(baseAgents(saved.workType));
+    setMissions(saved.missions); setDrafts(saved.drafts);
+    artifactMissionsRef.current = { ...saved.artifactMissions };
+    setChangedFiles(saved.files.order); setFileContents(saved.files.contents); setFileLanguages(saved.files.languages); setActiveFile(saved.files.active);
+    setDesignTitle(saved.design.title); setDesignElements(saved.design.elements);
+    setResearchSources(saved.research.sources); setResearchPaper(saved.research.paper);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+  useEffect(() => {
+    if (!restoredRef.current) return;
+    const timer = setTimeout(() => saveWorkspace({
+      workType, missions, drafts, artifactMissions: { ...artifactMissionsRef.current },
+      files: { active: activeFile, order: changedFiles, contents: fileContents, languages: fileLanguages },
+      design: { title: designTitle, elements: designElements },
+      research: { sources: researchSources, paper: researchPaper },
+    }), 400);
+    return () => clearTimeout(timer);
+  }, [workType, missions, drafts, activeFile, changedFiles, fileContents, fileLanguages, designTitle, designElements, researchSources, researchPaper]);
   const saveAccessCode = (code: string) => {
     accessCodeRef.current = code;
     setAccessCode(code);

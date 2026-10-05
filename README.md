@@ -99,7 +99,11 @@ server-side credential storage, revocation, and supported provider integrations.
 
 Design and research use live mode. Design streams a typed spatial board into the canvas. Research uses the AI Gateway web-search tool, preserves returned source URLs, writes a multi-section paper from that source packet, and sends it through an independent research review.
 
-Generated artifacts remain in the browser session; neither real execution mode writes to the host filesystem.
+Generated artifacts are saved in the browser's local storage so a refresh keeps
+the last files, board and paper for each workspace; neither real execution mode
+writes to the host filesystem. Runs themselves are tied to the streaming
+request: closing the tab stops the run. Server-side run storage with
+reconnectable event streams is the next step for durable, shareable runs.
 
 Claude Code and Codex use the experimental AI SDK harness interface. Harness sessions require `VERCEL_OIDC_TOKEN` and provision billable isolated sandboxes. The request-scoped implementation always destroys its sandbox; persistent projects should store each opaque resume state and sandbox identity in durable storage.
 

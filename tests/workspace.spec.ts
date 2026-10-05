@@ -178,3 +178,13 @@ test('stopping a run says it stopped and offers a retry', async ({ page }) => {
   await expect(page.locator('.live-pill')).toHaveText('Stopped');
   await expect(page.getByRole('button', { name: 'Retry run', exact: true })).toBeEnabled();
 });
+
+test('generated files and the mission survive a page reload', async ({ page }) => {
+  await stream(page, [file, complete]);
+  await start(page, 'Persist me');
+  await expect(page.locator('.code-scroll')).toContainText('Hello');
+  await page.waitForTimeout(600);
+  await page.reload();
+  await expect(page.locator('.code-scroll')).toContainText('Hello');
+  await expect(page.locator('.mission-card h1')).toHaveText('Persist me');
+});
