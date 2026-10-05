@@ -24,7 +24,7 @@ export function MissionCard({ workType, mission, runState, progress, canClear, o
         <div className="mission-label-row"><span>{config.eyebrow}</span><span className="mission-status"><span /> {runState === 'running' ? 'In progress' : RUN_LABELS[runState].mission}</span></div>
         <h1>{mission || config.emptyMission}</h1>
       </div><button className="more-button" aria-label="Clear workspace" title="Clear this workspace" disabled={!canClear} onClick={onClear}><Trash2 size={16} /></button></div>
-      <div className="mission-progress-row"><div className="large-progress"><span style={{ width: `${progress}%` }} /></div><strong>{progress}%</strong></div>
+      <div className="mission-progress-row"><div className="large-progress" role="progressbar" aria-label="Run progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><span style={{ width: `${progress}%` }} /></div><strong>{progress}%</strong></div>
       <div className="task-flow">{config.tasks.map((label, index) => {
         const TaskIcon = taskIcons[index];
         const state = progress >= DONE_AT[index] ? 'done' : progress >= ACTIVE_AT[index] ? 'active' : 'waiting';

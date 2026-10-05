@@ -1734,3 +1734,13 @@ button {
 .canvas-text-editor { width: 100%; height: 100%; padding: 0; border: 0; background: transparent; font: inherit; text-align: inherit; resize: none; outline: none; }
 .canvas-resize-handle { position: absolute; right: -6px; bottom: -6px; width: 11px; height: 11px; border: 2px solid #6d7ee8; border-radius: 3px; background: #fff; cursor: nwse-resize; touch-action: none; }
 .design-toolbar-group button:disabled { cursor: not-allowed; opacity: 0.35; }
+
+/* Accessibility: secondary text meets WCAG AA contrast (4.5:1) on every panel background. */
+.branch-label, .live-pill.idle, .stack-more, .work-type-tabs button, .eyebrow,
+.status-label.queued, .agent-role, .connection-row em, .connection-card p,
+.mission-label-row > span:first-child, .mission-progress-row strong, .task-flow-item span,
+.sync-state, .working-count, .tree-heading span, .empty-files, .breadcrumb-row span,
+.empty-editor span, .editor-footer span, .summary-strip span, .empty-activity span,
+.activity-footer, .asset-tools button span, .zoom-controls span, .research-panel-title,
+.empty-research-paper p { color: #59625d; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

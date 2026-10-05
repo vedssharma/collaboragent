@@ -240,7 +240,7 @@ export function DesignCanvas({
           <button onClick={redo} disabled={future.length === 0} aria-label="Redo" title="Redo (Ctrl+Shift+Z)"><Redo2 size={14} /></button>
           <button onClick={removeSelected} disabled={!selected} aria-label="Delete selected element" title="Delete (Del)"><Trash2 size={14} /></button>
         </div>
-        <div className="canvas-presence" aria-label="Agents on the canvas">
+        <div className="canvas-presence" role="group" aria-label="Agents on the canvas">
           {agents
             .filter((agent) => agent.status !== 'queued')
             .slice(0, 3)

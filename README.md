@@ -52,7 +52,8 @@ To use an already-installed Chromium instead of downloading one, set
 
 The suite covers mobile submission, retry preservation, interrupted streams,
 keyboard submission, review counts, empty files, research navigation, canvas
-panning/export, request validation, and provider setup. Boards export as SVG.
+panning/export, request validation, provider setup, and axe accessibility checks for each
+workspace. Boards export as SVG.
 
 The harness smoke test provisions a real Vercel Sandbox and verifies the full
 Claude Code → Codex → Claude handoff on one shared file, so it incurs provider
