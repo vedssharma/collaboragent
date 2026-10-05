@@ -7,7 +7,7 @@ import { getSandboxOptions } from './provider-config';
 import { resolveModels } from './models';
 import { gateway, Output, ToolLoopAgent } from 'ai';
 import { z } from 'zod';
-import type { AgentId, RunEvent } from '@/lib/types';
+import type { AgentId, RunEventInput } from '@/lib/types';
 import type { Refinement } from '@/lib/refinement';
 import { safeArchivePath } from '@/lib/zip';
 
@@ -77,7 +77,7 @@ const researchAgent = new ToolLoopAgent({
     'You are a pragmatic UX researcher. Produce a concise implementation direction and prioritized user needs for a coding team.',
 });
 
-type HarnessEventInput = Omit<RunEvent, 'id' | 'at' | 'mode'>;
+type HarnessEventInput = RunEventInput;
 type EmitHarnessEvent = (event: HarnessEventInput) => void;
 
 type LooseStreamPart = {

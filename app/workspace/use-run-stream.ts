@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import type { Refinement } from '@/lib/refinement';
 import { createSseParser } from '@/lib/sse';
+import { parseRunEvent } from '@/lib/run-events';
 import type { RunEvent, WorkType } from '@/lib/types';
 import type { ExecutionMode } from './config';
 
@@ -20,9 +21,9 @@ export class RunStartError extends Error {
 }
 
 function hasArtifact(event: RunEvent, workType: WorkType) {
-  if (workType === 'coding') return event.file !== undefined;
-  if (workType === 'design') return event.element !== undefined;
-  return event.source !== undefined || event.paper !== undefined;
+  if (workType === 'coding') return event.type === 'file';
+  if (workType === 'design') return event.type === 'canvas';
+  return event.type === 'source' || event.type === 'paper';
 }
 
 /**
@@ -71,7 +72,9 @@ export function useRunStream({ getAccessCode, onEvent, onFirstArtifact, onStartE
         if (controller.signal.aborted) return;
         if (done) break;
         for (const data of parser.push(decoder.decode(value, { stream: true }))) {
-          const runEvent = JSON.parse(data) as RunEvent;
+          const runEvent = parseRunEvent(JSON.parse(data));
+          // A malformed event is dropped rather than corrupting the workspace.
+          if (!runEvent) { console.warn('Ignored a malformed run event', data.slice(0, 200)); continue; }
           if (firstArtifact && hasArtifact(runEvent, request.workType)) {
             firstArtifact = false;
             onFirstArtifact(request);

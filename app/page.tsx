@@ -73,7 +73,7 @@ export default function Home() {
       if (runEvent.workType === 'research') { setResearchSources([]); setResearchPaper(null); }
     }
     if (typeof runEvent.progress === 'number') setProgress(runEvent.progress);
-    if (runEvent.file) {
+    if (runEvent.type === 'file') {
       const path = runEvent.file;
       setFiles((current) => {
         const before = current.contents[path];
@@ -88,10 +88,16 @@ export default function Home() {
         };
       });
     }
-    if (runEvent.element) setDesignElements((current) => [...current.filter((item) => item.id !== runEvent.element?.id), runEvent.element as DesignElement]);
-    if (runEvent.designTitle) setDesignTitle(runEvent.designTitle);
-    if (runEvent.source) setResearchSources((current) => [...current.filter((item) => item.id !== runEvent.source?.id), runEvent.source as ResearchSource]);
-    if (runEvent.paper) setResearchPaper(runEvent.paper);
+    if (runEvent.type === 'canvas') {
+      const { element, designTitle: title } = runEvent;
+      setDesignElements((current) => [...current.filter((item) => item.id !== element.id), element]);
+      if (title) setDesignTitle(title);
+    }
+    if (runEvent.type === 'source') {
+      const { source } = runEvent;
+      setResearchSources((current) => [...current.filter((item) => item.id !== source.id), source]);
+    }
+    if (runEvent.type === 'paper') setResearchPaper(runEvent.paper);
     if (runEvent.checks) setChecks(runEvent.checks);
     if (runEvent.usage) setRunUsage(runEvent.usage);
     if (runEvent.agentId && runEvent.cursor) setLastCursor({ agentId: runEvent.agentId, ...runEvent.cursor });

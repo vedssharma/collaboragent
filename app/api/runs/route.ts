@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { RunEvent } from '@/lib/types';
+import type { RunEvent, RunEventInput } from '@/lib/types';
 import { runLiveCollaboration } from '@/lib/live-collaboration';
 import { runHarnessCollaboration } from '@/lib/harness-collaboration';
 import { getExecutionCapabilities } from '@/lib/provider-config';
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     async start(controller) {
       let eventIndex = 0;
       let closed = false;
-      const send = (eventInput: Omit<RunEvent, 'id' | 'at' | 'mode'>) => {
+      const send = (eventInput: RunEventInput) => {
         if (cancelled || closed) return;
         const payload: RunEvent = {
           ...eventInput,

@@ -4,7 +4,7 @@ import type {
   DesignElement,
   ResearchPaper,
   ResearchSource,
-  RunEvent,
+  RunEventInput,
   WorkType,
 } from '@/lib/types';
 import { createUsageTracker, resolveModels } from '@/lib/models';
@@ -176,7 +176,7 @@ const researchPaperSchema = z
   })
   .strict();
 
-export type LiveEventInput = Omit<RunEvent, 'id' | 'at' | 'mode'>;
+export type LiveEventInput = RunEventInput;
 type EmitLiveEvent = (event: LiveEventInput) => void;
 
 const architect = new ToolLoopAgent({

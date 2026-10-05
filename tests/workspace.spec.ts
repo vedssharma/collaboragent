@@ -91,7 +91,7 @@ test('file can be updated to empty content', async ({ page }) => {
 
 test('paper abstract and conclusion links scroll', async ({ page }) => {
   await page.getByRole('button', { name: 'Research', exact: true }).click();
-  await stream(page, [{ type: 'paper', paper: {
+  await stream(page, [{ type: 'paper', message: 'Paper drafted', paper: {
     title: 'Navigation', subtitle: 'Test', abstract: 'Abstract', conclusion: 'Conclusion',
     sections: Array.from({ length: 5 }, (_, i) => ({ id: `s${i}`, heading: `Section ${i}`, paragraphs: Array(5).fill('Long paragraph. '.repeat(60)), sourceIds: [] })),
   } }, complete]); await start(page, 'Research');
@@ -283,4 +283,17 @@ test('canvas elements can be edited, resized, deleted and restored with undo', a
   const downloaded = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export PNG' }).click();
   expect((await downloaded).suggestedFilename()).toBe('design-board.png');
+});
+
+test('malformed events are ignored instead of corrupting the workspace', async ({ page }) => {
+  await stream(page, [
+    { type: 'file', message: 'Missing path', content: 'Should not appear' } as Partial<RunEvent>,
+    { type: 'canvas', message: 'Bad element', element: { id: 'x' } } as unknown as Partial<RunEvent>,
+    file,
+    complete,
+  ]);
+  await start(page);
+  await expect(page.locator('.code-scroll')).toContainText('Hello');
+  await expect(page.locator('.code-scroll')).not.toContainText('Should not appear');
+  await expect(page.locator('.file-tree .file-row')).toHaveCount(1);
 });
