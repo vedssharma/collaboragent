@@ -258,3 +258,29 @@ test('token usage from the run is shown when it completes', async ({ page }) => 
   await start(page);
   await expect(page.locator('.activity-footer')).toHaveText('12.4k in · 3.1k out · 4 model calls');
 });
+
+test('canvas elements can be edited, resized, deleted and restored with undo', async ({ page }) => {
+  await page.getByRole('button', { name: 'Design', exact: true }).click();
+  await page.getByRole('button', { name: 'Note', exact: true }).click();
+  const note = page.locator('.canvas-sticky');
+  await note.dblclick();
+  await page.getByRole('textbox', { name: 'Element text' }).fill('Edited note');
+  await page.keyboard.press('Enter');
+  await expect(note).toContainText('Edited note');
+
+  const before = (await note.boundingBox())!;
+  const handle = (await page.locator('.canvas-resize-handle').boundingBox())!;
+  await page.mouse.move(handle.x + 4, handle.y + 4); await page.mouse.down();
+  await page.mouse.move(handle.x + 80, handle.y + 60, { steps: 6 }); await page.mouse.up();
+  expect((await note.boundingBox())!.width).toBeGreaterThan(before.width + 40);
+
+  await note.focus();
+  await page.keyboard.press('Delete');
+  await expect(note).toHaveCount(0);
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(page.locator('.canvas-sticky')).toContainText('Edited note');
+
+  const downloaded = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export PNG' }).click();
+  expect((await downloaded).suggestedFilename()).toBe('design-board.png');
+});

@@ -2,7 +2,7 @@
 
 import {
   Activity, ArrowUp, BookOpen, Check, Copy, Download, ChevronDown, ChevronRight, CircleDot,
-  Clock3, Code2, GitCompare, Layers, Command, FileCode2, Files, GitBranch, LayoutGrid, Library,
+  Clock3, Code2, GitCompare, ImageDown, Layers, Command, FileCode2, Files, GitBranch, LayoutGrid, Library,
   Palette, PanelLeftClose, PenTool, RotateCcw, Square,
   Play, Radio, Search, Settings, ShieldCheck, Sparkles, Users,
   Trash2, WandSparkles, Zap, CheckCircle2,
@@ -10,7 +10,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DesignCanvas } from '@/app/design-canvas';
 import { ResearchPaper } from '@/app/research-paper';
-import { downloadDesignBoard } from '@/lib/design-export';
+import { downloadDesignBoard, downloadDesignBoardPng } from '@/lib/design-export';
 import { loadWorkspace, saveWorkspace } from '@/lib/workspace-storage';
 import { createZip, downloadBlob, slugify } from '@/lib/zip';
 import type { Refinement } from '@/lib/refinement';
@@ -424,6 +424,7 @@ export default function Home() {
             <div className="avatar-stack" aria-label="Four agents in this room">{agents.slice(0, 3).map((agent) => <AgentAvatar key={agent.id} agent={agent} small />)}<span className="stack-more">+1</span></div>
             {workType === 'coding' && <button className="ghost-button" disabled={changedFiles.length === 0} onClick={downloadCode}><Download size={15} />Download code</button>}
             {workType === 'design' && <button className="ghost-button" disabled={designElements.length === 0} onClick={() => downloadDesignBoard(designTitle, designElements)}><Palette size={15} />Export board</button>}
+            {workType === 'design' && <button className="ghost-button" disabled={designElements.length === 0} onClick={() => { void downloadDesignBoardPng(designTitle, designElements).catch(() => undefined); }}><ImageDown size={15} />Export PNG</button>}
             {workType === 'research' && <button className="ghost-button" disabled={researchSources.length === 0} onClick={showSourceLibrary}><Library size={15} />Source library</button>}
           </div>
         </header>
