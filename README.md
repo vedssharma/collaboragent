@@ -6,11 +6,12 @@ Collaboragent is a working product prototype for a shared AI-agent workspace. A 
 
 - A responsive collaboration room with agent ownership, status, progress, file activity, and Google-Docs-style cursors.
 - Dedicated coding, design, and research workspaces with mode-specific agent roles and workflows.
-- An editable spatial canvas for agent-created shapes, assets, notes, labels, and diagrams.
-- A web-grounded research studio that streams verified sources into a structured, citation-linked paper.
+- An editable spatial canvas for agent-created shapes, assets, notes, labels, and diagrams, with text editing, resizing, deletion, undo/redo and keyboard moves.
+- A web-grounded research studio that keeps only sources the web search actually returned and removes citations to anything else.
 - A streamed server-sent event protocol for run, agent, task, file, review, and completion events.
 - Interactive mission submission, stopping, retrying (output merges into existing artifacts), agent inspection, and file selection.
-- Real AI SDK v7 execution across Claude, Gemini, and OpenAI/Codex models.
+- Real AI SDK v7 execution across Claude, Gemini, and OpenAI/Codex models, with one revision round whenever the independent reviewer requests changes.
+- A highlighted code view with a diff against each file's previous version.
 - Follow-up requests: turn on **Build on result** to send the current files, board or paper with the next instruction so the team revises it instead of starting over. Coding-agent runs restore the previous files into the sandbox first.
 - Claude Code and Codex harness adapters, plus a provider readiness endpoint.
   Harness runs collect up to 60 files (48 KB each, 400 KB total) and report anything skipped or truncated.
@@ -29,6 +30,7 @@ Quality checks:
 ```bash
 npm run typecheck
 npm run lint
+npm run test:unit
 npm run build
 npm run smoke:harness
 ```
@@ -52,8 +54,9 @@ To use an already-installed Chromium instead of downloading one, set
 
 The suite covers mobile submission, retry preservation, interrupted streams,
 keyboard submission, review counts, empty files, research navigation, canvas
-panning/export, request validation, provider setup, and axe accessibility checks for each
-workspace. Boards export as SVG.
+panning/editing/export, code download, follow-ups, event validation, request
+validation, provider setup, and axe accessibility checks for each workspace.
+Boards export as SVG or PNG and generated code downloads as a zip archive.
 
 The harness smoke test provisions a real Vercel Sandbox and verifies the full
 Claude Code → Codex → Claude handoff on one shared file, so it incurs provider
